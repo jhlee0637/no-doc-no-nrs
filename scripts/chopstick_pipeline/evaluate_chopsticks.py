@@ -20,18 +20,18 @@ def obj(properties):
 POINT = obj({"x": {"type": "number", "minimum": 0, "maximum": 1},
              "y": {"type": "number", "minimum": 0, "maximum": 1}})
 SCHEMA = obj({
-    "status": {"type": "string", "enum": ["assessable", "uncertain", "not_assessable", "view_mismatch"]},
+    "status": {"type": "string", "enum": ["assessable", "uncertain", "not_assessable", "view_mismatch", "pose_mismatch"]},
     "comment": {"type": "string"},
     "reference_notes": {"type": "string"},
     "limitations": {"type": "array", "items": {"type": "string"}},
-    "corrections": {"type": "array", "maxItems": 6, "items": obj({
+    "corrections": {"type": "array", "maxItems": 20, "items": obj({
         "hand_index": {"type": "integer", "minimum": 0},
         "landmark_id": {"type": "integer", "minimum": 0, "maximum": 20},
         "joint_name": {"type": "string"},
         "observation": {"type": "string"},
         "instruction": {"type": "string"},
         "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
-        "draw_arrow": {"type": "boolean"},
+        "show_target": {"type": "boolean"},
         "start": POINT,
         "target": POINT,
     })},
@@ -50,17 +50,48 @@ reference가 올바른 자세인지도 검토하고 잘못된 자세를 무조�
 손가락이 굽혀진 정도나 젓가락 잡는 자세 차이 자체는 교정 대상이지 구도 불일치가
 아닙니다. 단순한 크기·위치 차이만으로 view_mismatch를 반환하지 마세요. 불일치가
 명확하지 않으면 uncertain으로 평가하고 limitations에 한계를 설명하세요.
+촬영 구도가 비교 가능하더라도, 젓가락 배치와 손가락의 접촉·지지 위치가 reference와
+너무 달라 작은 관절 교정만으로 목표 자세를 제안하기 어려우면 status=pose_mismatch,
+corrections=[]로 반환하세요. 예: 두 젓가락을 주먹으로 함께 움켜쥐거나,
+엄지·검지·중지의 위 젓가락 조절과 약지의 아래 젓가락 지지 관계가 크게 달라
+젓가락과 손가락을 전반적으로 다시 배치해야 하는 경우입니다.
+comment에는 실제로 보이는 큰 차이를 간단히 설명하고,
+"기준 사진처럼 젓가락과 손가락 위치를 맞춰 다시 잡은 뒤 촬영해 주세요."라고 안내하세요.
+단순한 이미지상의 평행 이동·크기·회전, 작은 손가락 위치 차이, 젓가락 개폐 단계 차이만으로
+pose_mismatch를 반환하지 마세요. 이러한 차이는 기존 교정 대상으로 평가하세요.
+구도 문제는 view_mismatch, 잡는 배치의 큰 차이는 pose_mismatch로 구분하세요.
 정지 사진만으로 실제 움직임, 정확한 3D 각도, 힘 또는 깊이를 단정하지 마세요.
-comment에 종합 평가와 먼저 연습할 동작을 쓰고 corrections에는 최대 6개 우선순위
+comment에 종합 평가와 먼저 연습할 동작을 쓰고 corrections에는 최대 20개 우선순위
 교정 지침을 담으세요. 각 지침에 query의 hand_index, MediaPipe landmark_id,
 관절 이름, 현재 관찰, 움직이거나 유지할 동작, 확신 정도를 기입하세요.
 번호: 0 손목, 1~4 엄지, 5~8 검지, 9~12 중지, 13~16 약지, 17~20 소지.
 start/target은 EXIF 회전 적용된 QUERY 전체 이미지의 왼쪽 위 원점, x는 오른쪽,
-y는 아래쪽인 0~1 정규화 좌표입니다. start는 해당 query 관절의 현재 위치,
-target은 작은 교정 방향을 나타내는 개략 지점입니다. 화살표는 정확한 목표 좌표나
-실측 이동량이 아닌 방향 안내입니다. 제공된 query JSON 좌표를 start로 사용하세요.
-방향이 2D 사진에서 명확하지 않거나 유지/깊이 방향 지침이면 draw_arrow=false로
-하고 start와 target은 같은 점으로 쓰세요. 저확신 지침에도 draw_arrow=false입니다.
+y는 아래쪽인 0~1 정규화 좌표입니다. start에는 제공된 query 관절 좌표를 사용하세요.
+target은 그 관절이 목표 자세에서 위치할 것으로 제안하는 QUERY 이미지 안의
+개략적인 최종 위치입니다. reference 좌표를 복사하지 말고 query 손의 크기,
+회전, 손바닥 구조와 젓가락 접촉 위치를 고려해 판단하세요.
+이번 시각화는 현재 관절에서 목표 위치까지의 화살표와 하늘색 목표점, 해당 landmark 번호입니다.
+화면상 이동 경로가 불명확하더라도 최종 위치를 합리적으로 제안할 수 있으면
+show_target=true로 하세요. 목표점은 실측값이 아닌 자세 연습용 제안입니다.
+손끝만 평가하지 말고 각 손가락의 관절 전체를 검토하세요.
+엄지는 1 CMC, 2 MCP, 3 IP, 4 TIP이며, 검지는 5 MCP, 6 PIP, 7 DIP, 8 TIP,
+중지는 9 MCP, 10 PIP, 11 DIP, 12 TIP, 약지는 13 MCP, 14 PIP, 15 DIP, 16 TIP,
+소지는 17 MCP, 18 PIP, 19 DIP, 20 TIP입니다.
+각 손가락의 굽힘과 펴기, 젓가락 지지 구조를 고려하여 이동이 필요한 MCP·PIP·DIP/IP
+관절 각각을 별도 correction으로 제안하세요. TIP만으로 손가락 전체 교정을 대신하지 마세요.
+같은 손가락의 여러 관절을 제안할 때는 연결된 손가락 형태와 관절 순서가 자연스럽도록
+목표점을 함께 판단하고, 뼈 길이가 크게 변하거나 관절이 뒤집히는 위치를 제안하지 마세요.
+각 교정 관절의 현재 query 위치에서 target까지 이동 화살표와 목표점을 표시합니다.
+인접 목표점 사이의 연결선은 표시하지 않습니다. start→target 방향이 instruction의
+이동 설명과 일치하는지 확인하고, 최종 목표점은 연결된 손가락 구조상 자연스럽게 제안하세요.
+같은 hand_index와 landmark_id를 중복 제안하지 마세요. 관절을 억지로 20개 채우지 마세요.
+이동이 불필요한 관절은 유지한다고 설명하고, 가려지거나 깊이 변화만 필요한 관절은
+show_target=false로 하세요. instruction에는 해당 손가락·관절, 굽힘/펴기 또는 위치 조정,
+젓가락 지지 역할을 명시하세요. target과 설명이 서로 일치해야 합니다.
+젓가락 자체만 옮기는 지시에는 관절 목표점을 만들지 마세요.
+유지하는 관절, 깊이만 달라지는 관절, 가림으로 최종 위치를 추정할 수 없는 관절,
+저확신 교정에는 show_target=false, start=target으로 반환하세요.
+확신 있는 교정 관절만 선택하고 limitations에 목표점의 불확실성을 설명하세요.
 손이나 젓가락을 확인할 수 없으면 not_assessable, corrections=[]로 반환하세요.
 명확한 교정이 불필요하면 corrections=[]도 가능합니다. limitations에 불확실성을 쓰세요.
 """
@@ -152,7 +183,7 @@ def validate(value, schema=SCHEMA, location="assessment"):
             raise ValueError(f"응답 값이 잘못됐습니다: {location}")
         if kind in ("integer", "number") and not schema.get("minimum", -float("inf")) <= value <= schema.get("maximum", float("inf")):
             raise ValueError(f"응답 값 범위 오류: {location}")
-    if location == "assessment" and value["status"] in ("not_assessable", "view_mismatch") and value["corrections"]:
+    if location == "assessment" and value["status"] in ("not_assessable", "view_mismatch", "pose_mismatch") and value["corrections"]:
         raise ValueError("평가 불가 응답에 교정 지침이 포함됐습니다.")
 
 
@@ -165,41 +196,41 @@ def anchor_corrections(assessment, query_data):
             raise ValueError("GPT가 query JSON에 없는 손을 지정했습니다.")
         point = next(p for p in hand["landmarks"] if p["id"] == correction["landmark_id"])
         if not 0 <= point["x"] <= 1 or not 0 <= point["y"] <= 1:
-            correction["draw_arrow"] = False
+            correction["show_target"] = False
             continue
-        old = correction["start"]
-        # Keep the proposed direction while anchoring to the actual landmark.
-        dx, dy = correction["target"]["x"] - old["x"], correction["target"]["y"] - old["y"]
+        # Preserve the absolute proposed target in query coordinates.
         correction["start"] = {"x": point["x"], "y": point["y"]}
-        correction["target"] = {"x": max(0, min(1, point["x"] + dx)),
-                                "y": max(0, min(1, point["y"] + dy))}
 
 
 def render(image, assessment):
     result = image.copy()
     draw = ImageDraw.Draw(result)
     width, height = result.size
-    line_width = max(3, round(min(width, height) / 180))
-    for number, correction in enumerate(assessment["corrections"], 1):
-        if not correction["draw_arrow"] or correction["confidence"] == "low":
+    radius = max(9, round(min(width, height) / 100))
+    for correction in assessment["corrections"]:
+        if not correction["show_target"] or correction["confidence"] == "low":
             continue
-        start = (correction["start"]["x"] * (width - 1), correction["start"]["y"] * (height - 1))
-        end = (correction["target"]["x"] * (width - 1), correction["target"]["y"] * (height - 1))
-        dx, dy = end[0] - start[0], end[1] - start[1]
+        x = correction["target"]["x"] * (width - 1)
+        y = correction["target"]["y"] * (height - 1)
+        start = (correction["start"]["x"] * (width - 1),
+                 correction["start"]["y"] * (height - 1))
+        dx, dy = x - start[0], y - start[1]
         length = math.hypot(dx, dy)
-        if length < 2:
-            continue
-        draw.line([start, end], fill="black", width=line_width + 4)
-        draw.line([start, end], fill="#00cfff", width=line_width)
-        ux, uy = dx / length, dy / length
-        head = min(length * 0.45, max(10, line_width * 4))
-        draw.polygon([end, (end[0] - ux*head - uy*head*0.5, end[1] - uy*head + ux*head*0.5),
-                      (end[0] - ux*head + uy*head*0.5, end[1] - uy*head - ux*head*0.5)], fill="#00cfff")
-        x, y = start
-        radius = max(10, line_width * 3)
-        x, y = max(radius, min(width-radius, x)), max(radius, min(height-radius, y))
-        draw.ellipse((x-radius, y-radius, x+radius, y+radius), fill="black", outline="#00cfff", width=2)
-        draw.text((x, y), str(number), fill="white", anchor="mm")
+        line_width = max(3, radius // 4)
+        if length > radius + 2:
+            ux, uy = dx / length, dy / length
+            end_x, end_y = x - ux * radius, y - uy * radius
+            draw.line([start, (end_x, end_y)], fill="black", width=line_width + 4)
+            draw.line([start, (end_x, end_y)], fill="#00cfff", width=line_width)
+            head = min((length - radius) * 0.4, radius * 1.5)
+            draw.polygon([(end_x, end_y),
+                          (end_x - ux*head - uy*head*0.5, end_y - uy*head + ux*head*0.5),
+                          (end_x - ux*head + uy*head*0.5, end_y - uy*head - ux*head*0.5)],
+                         fill="#00cfff")
+        # Cyan target circles differ from red current landmarks and green bones.
+        draw.ellipse((x-radius, y-radius, x+radius, y+radius),
+                     fill="#00cfff", outline="black", width=max(2, radius // 8))
+        draw.text((x, y), str(correction["landmark_id"]), fill="black", anchor="mm")
     return result
 
 
@@ -208,7 +239,7 @@ def comments_text(assessment):
     for number, correction in enumerate(assessment["corrections"], 1):
         lines.extend([f"{number}. {correction['joint_name']} (손 {correction['hand_index']}, 관절 {correction['landmark_id']}, 확신: {correction['confidence']})",
                       "   관찰: " + correction["observation"], "   동작: " + correction["instruction"]])
-    lines.extend(["", "이미지의 파란 화살표 번호는 위 지침 번호입니다. 화살표는 개략적인 2D 방향이며 정확한 이동량이 아닙니다."])
+    lines.extend(["", "하늘색 원의 번호는 MediaPipe 관절 번호입니다. 하늘색 화살표는 원래 관절 위치에서 목표점까지의 이동을 나타냅니다. 목표점과 선은 개략적인 2D 자세 제안이며 실측 위치가 아닙니다."])
     lines.extend("한계: " + item for item in assessment["limitations"])
     return "\n".join(lines) + "\n"
 

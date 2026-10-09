@@ -39,6 +39,7 @@ class PipelineTests(unittest.TestCase):
         self.assertTrue(request.call_args.args[0].startswith('data:image/jpeg;base64,'))
         self.assertTrue(request.call_args.args[1].startswith('data:image/jpeg;base64,'))
         self.assertEqual(result['assessment']['corrections'][0]['start'], {'x': .5, 'y': .5})
+        self.assertEqual(result['assessment']['corrections'][0]['target'], {'x': .55, 'y': .4})
         for name in ('correction.png', 'comments.txt', 'assessment.json', 'result.json'):
             self.assertTrue((self.root / 'out' / name).is_file())
         self.assertNotIn(str(self.root), (self.root / 'out' / 'result.json').read_text())
@@ -68,6 +69,29 @@ class PipelineTests(unittest.TestCase):
         self.assertIsNone(result['image'])
         self.assertFalse((self.root / 'out' / 'correction.png').exists())
         self.assertEqual(json.loads((self.root / 'out' / 'result.json').read_text())['reason'], 'view_mismatch')
+
+    def test_pose_mismatch_requires_regrip_guidance_and_no_image(self):
+        assessment = sample()
+        assessment.update(status='pose_mismatch', corrections=[], comment='잡는 배치가 다릅니다.')
+        with patch.object(app, 'mark_joints', side_effect=self.detect), \
+             patch.object(app.evaluator, 'request_assessment', return_value=(assessment, 'private-id')):
+            result = self.run_app()
+        self.assertEqual(result['status'], 'retake')
+        self.assertEqual(result['reason'], 'pose_mismatch')
+        self.assertIn('잡는 배치가 다릅니다.', result['comment'])
+        self.assertIn('기준 사진처럼 젓가락과 손가락 위치를 맞춰 다시 잡은 뒤 촬영해 주세요.', result['comment'])
+        self.assertIsNone(result['image'])
+        self.assertFalse((self.root / 'out' / 'correction.png').exists())
+        self.assertFalse((self.root / 'out' / 'comments.txt').exists())
+        saved = json.loads((self.root / 'out' / 'result.json').read_text())
+        self.assertEqual(saved['reason'], 'pose_mismatch')
+        self.assertEqual(saved['comment'], result['comment'])
+
+    def test_pose_mismatch_must_not_include_corrections(self):
+        assessment = sample()
+        assessment['status'] = 'pose_mismatch'
+        with self.assertRaises(ValueError):
+            app.evaluator.validate(assessment)
 
     def test_view_mismatch_must_not_include_corrections(self):
         assessment = sample()

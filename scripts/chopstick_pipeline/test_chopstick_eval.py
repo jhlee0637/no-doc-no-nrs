@@ -14,7 +14,7 @@ def sample():
     return {"status": "assessable", "comment": "검지를 조금 펴세요.", "reference_notes": "기준 자세를 비교했습니다.",
             "limitations": ["정지 사진의 방향 안내입니다."], "corrections": [{
                 "hand_index": 0, "landmark_id": 8, "joint_name": "검지 끝", "observation": "굽혀져 있습니다.",
-                "instruction": "검지 끝을 조금 오른쪽으로 이동하세요.", "confidence": "medium", "draw_arrow": True,
+                "instruction": "검지 끝을 조금 오른쪽으로 이동하세요.", "confidence": "medium", "show_target": True,
                 "start": {"x": 0.4, "y": 0.4}, "target": {"x": 0.55, "y": 0.4}}]}
 
 
@@ -38,6 +38,7 @@ class EvaluationTests(unittest.TestCase):
             self.assertFalse(payload["store"])
             self.assertTrue(payload["text"]["format"]["strict"])
             self.assertEqual(result["assessment"]["corrections"][0]["start"], {"x": 0.5, "y": 0.5})
+            self.assertEqual(result["assessment"]["corrections"][0]["target"], {"x": 0.55, "y": 0.4})
             with Image.open(result["image_path"]) as rendered:
                 self.assertEqual(rendered.size, (200, 100))
                 self.assertTrue(any(pixel != (255, 255, 255) for pixel in rendered.getdata()))
@@ -66,7 +67,42 @@ class EvaluationTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     app.request_assessment("ref", "query", None, None, "mock-model", "mock-key")
 
-    def test_low_confidence_no_arrows(self):
+    def test_absolute_target_survives_start_anchoring(self):
+        value = sample()
+        target = copy.deepcopy(value["corrections"][0]["target"])
+        data = {"hands": [{"hand_index": 0, "landmarks": [{"id": 8, "x": .8, "y": .7}]}]}
+        app.anchor_corrections(value, data)
+        self.assertEqual(value["corrections"][0]["start"], {"x": .8, "y": .7})
+        self.assertEqual(value["corrections"][0]["target"], target)
+
+    def test_twenty_corrections_allowed_twenty_one_rejected(self):
+        value = sample()
+        value["corrections"] = [copy.deepcopy(value["corrections"][0]) for _ in range(20)]
+        for identifier, correction in enumerate(value["corrections"]):
+            correction["landmark_id"] = identifier
+        app.validate(value)
+        value["corrections"].append(copy.deepcopy(value["corrections"][0]))
+        with self.assertRaises(ValueError):
+            app.validate(value)
+
+    def test_arrow_runs_to_absolute_target_and_circle_marks_target(self):
+        value = sample()
+        value["corrections"][0].update(start={"x": .2, "y": .5}, target={"x": .8, "y": .5})
+        image = Image.new("RGB", (401, 201), "white")
+        rendered = app.render(image, value)
+        cyan = (0, 207, 255)
+        self.assertEqual(rendered.getpixel((200, 100)), cyan)  # arrow shaft
+        self.assertEqual(rendered.getpixel((320, 94)), cyan)   # target circle away from label
+        self.assertEqual(rendered.getpixel((80, 90)), (255, 255, 255))  # no target circle at start
+        self.assertEqual(image.getpixel((200, 100)), (255, 255, 255))   # source preserved
+
+    def test_hidden_target_does_not_change_image(self):
+        value = sample()
+        value["corrections"][0]["show_target"] = False
+        image = Image.new("RGB", (200, 100), "white")
+        self.assertEqual(app.render(image, value).tobytes(), image.tobytes())
+
+    def test_low_confidence_hides_targets_and_arrows(self):
         value = sample()
         value["corrections"][0]["confidence"] = "low"
         image = Image.new("RGB", (200, 100), "white")
