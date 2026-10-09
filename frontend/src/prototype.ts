@@ -13,7 +13,8 @@ export type DemoOutcome =
   | {
       kind: "feedback";
       requestId: string;
-      source: "mock";
+      source: "mock" | "analysis";
+      assessmentStatus?: "assessable" | "uncertain";
       title: string;
       summary: string;
       details: Array<{ label: string; text: string }>;
@@ -21,7 +22,7 @@ export type DemoOutcome =
         | { kind: "not-provided" }
         | { kind: "provided"; url: string; mimeType: "image/png"; width: number; height: number };
     }
-  | { kind: "retake" | "error"; requestId: string; source: "mock"; title: string; message: string };
+  | { kind: "retake" | "error"; requestId: string; source: "mock" | "analysis" | "preparation"; title: string; message: string };
 
 export interface DemoInput {
   file: File;

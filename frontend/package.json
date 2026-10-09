@@ -7,8 +7,10 @@
     "dev": "vite --host 127.0.0.1 --port 5173 --strictPort",
     "check": "tsc --noEmit",
     "build": "tsc --noEmit && vite build",
+    "build:offline": "tsc --noEmit && vite build --mode offline --outDir ../etc/offline-demo/build && node scripts/ai-generated-build-offline.mjs",
     "preview": "vite preview --host 127.0.0.1 --port 4173 --strictPort",
-    "test": "playwright test"
+    "test": "playwright test",
+    "test:offline": "playwright test --config playwright.offline.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.64.0",

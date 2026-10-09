@@ -1,0 +1,10 @@
+{
+  "schema_version": "1",
+  "references": {
+    "basic_grip": {
+      "reference_id": "reference-zip-draft",
+      "reference_version": "draft-1",
+      "image": "reference_zip.png"
+    }
+  }
+}
