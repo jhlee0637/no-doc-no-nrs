@@ -1,0 +1,18 @@
+etc/*
+
+# Copyrighted reference papers: local use only.
+/docs/references/
+
+# Windows download metadata accompanying reference files.
+/docs/*:Zone.Identifier
+
+# Private configuration, credentials, and generated local artifacts.
+.env
+.env.*
+/.aws/
+/.codex/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+node_modules/
