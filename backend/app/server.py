@@ -238,8 +238,8 @@ def build_server(settings=None, *, port=8000, host="127.0.0.1"):
             self.close_connection = True
             try:
                 self.wfile.write(content)
-            except (BrokenPipeError, ConnectionResetError, socket.timeout):
-                pass
+            except (BrokenPipeError, ConnectionResetError, socket.timeout) as exc:
+                print(f"HTTP response delivery failed: {type(exc).__name__}", flush=True)
 
         def send_json(self, status, value):
             self.send_content(status, json.dumps(value, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
