@@ -1,5 +1,6 @@
 import "./styles.css";
 import { runMock, type DemoOutcome, type DemoScenario, type SelectedPhoto } from "./prototype";
+import { runPrototypeHttp } from "./api/prototype-http";
 
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("화면을 표시할 영역이 없습니다.");
@@ -14,7 +15,7 @@ app.innerHTML = `
       <p class="eyebrow">사진 한 장으로 시작하는 젓가락 코칭</p>
       <h1 id="page-title">나의 젓가락 자세,<br />사진으로 확인해요.</h1>
       <p class="muted">젓가락을 잡은 손 사진을 선택하고 교정 안내 화면을 미리 살펴보세요.</p>
-      <p class="notice">화면 검증용 모의 응답 · 서버 전송 없음</p>
+      <p id="transport-notice" class="notice">화면 검증용 모의 응답 · 서버 전송 없음</p>
     </section>
     <div class="workspace">
       <section class="card" aria-labelledby="photo-heading">
@@ -27,6 +28,7 @@ app.innerHTML = `
         <div id="photo-meta" class="photo-meta" hidden><strong id="file-name"></strong><span id="file-details" class="muted"></span><span class="preview-caption">선택한 원본의 브라우저 미리보기</span></div>
         <div class="actions"><button id="replace-photo" class="button button-secondary" type="button">사진 선택</button><button id="clear-photo" class="button button-secondary" type="button" disabled>사진 지우기</button></div>
         <p class="muted">손과 젓가락이 함께 보이도록 촬영하면 좋아요.</p>
+        <div class="scenario-control"><label for="demo-transport">모의 연결 방식</label><select id="demo-transport"><option value="browser">브라우저 화면 예시 · 전송 없음</option><option value="http">localhost HTTP 모의 서버</option></select></div>
         <div class="scenario-control"><label for="demo-scenario">살펴볼 모의 화면</label><select id="demo-scenario"><option value="feedback">교정 안내</option><option value="retake">재촬영 안내</option><option value="error">서비스 오류</option></select></div>
         <div class="actions"><button id="show-result" class="button button-primary" type="button" disabled>모의 결과 보기 <span aria-hidden="true">→</span></button><button id="cancel-request" class="button button-secondary" type="button" hidden>취소</button></div>
         <p id="status-message" class="status" role="status" aria-live="polite" aria-atomic="true">사진을 선택하면 미리보기를 확인할 수 있습니다.</p>
@@ -39,6 +41,7 @@ app.innerHTML = `
           <h3 id="feedback-title" class="feedback-title"></h3>
           <p id="result-body" class="result-body"></p>
           <div id="result-image-placeholder" class="image-placeholder" hidden><strong>교정 이미지 제공 대기</strong><p class="muted">실제 결과 이미지가 연결되면 이곳에 표시됩니다.</p></div>
+          <div id="result-image-container" class="image-placeholder" hidden><img id="correction-image" class="preview-image" alt="HTTP 연결 검증용 합성 이미지. 실제 교정 결과가 아닙니다." hidden /><p id="result-image-status" class="muted" role="status" aria-live="polite"></p></div>
           <details id="feedback-details" class="details" hidden><summary>관절별 안내 예시 펼치기</summary><div id="detail-list"></div></details>
           <p class="notice">선택한 사진을 분석한 결과가 아닌 화면 예시입니다.</p>
         </div>
@@ -65,6 +68,8 @@ const clearButton = element<HTMLButtonElement>("clear-photo");
 const showButton = element<HTMLButtonElement>("show-result");
 const cancelButton = element<HTMLButtonElement>("cancel-request");
 const scenario = element<HTMLSelectElement>("demo-scenario");
+const transport = element<HTMLSelectElement>("demo-transport");
+const transportNotice = element<HTMLElement>("transport-notice");
 const status = element<HTMLElement>("status-message");
 const resultPanel = element<HTMLElement>("result-panel");
 const resultEmpty = element<HTMLElement>("result-empty");
@@ -72,6 +77,9 @@ const resultContent = element<HTMLElement>("result-content");
 const title = element<HTMLElement>("feedback-title");
 const resultBody = element<HTMLElement>("result-body");
 const placeholder = element<HTMLElement>("result-image-placeholder");
+const imageContainer = element<HTMLElement>("result-image-container");
+const correctionImage = element<HTMLImageElement>("correction-image");
+const imageStatus = element<HTMLElement>("result-image-status");
 const details = element<HTMLDetailsElement>("feedback-details");
 const detailList = element<HTMLElement>("detail-list");
 
@@ -81,6 +89,8 @@ let requestGeneration = 0;
 let decoding = false;
 let requestController: AbortController | null = null;
 let decodingUrl: string | null = null;
+let imageGeneration = 0;
+let detachImageHandlers: (() => void) | null = null;
 
 function message(text: string): void {
   status.textContent = text;
@@ -91,12 +101,20 @@ function updateControls(): void {
   clearButton.disabled = !photo && !decoding;
   showButton.disabled = !photo || decoding || running;
   scenario.disabled = running;
+  transport.disabled = running;
   cancelButton.hidden = !running;
   resultPanel.setAttribute("aria-busy", String(running));
   replaceButton.textContent = photo ? "사진 바꾸기" : "사진 선택";
 }
 
 function resetResult(): void {
+  imageGeneration += 1;
+  detachImageHandlers?.();
+  detachImageHandlers = null;
+  correctionImage.hidden = true;
+  correctionImage.removeAttribute("src");
+  imageContainer.hidden = true;
+  imageStatus.textContent = "";
   resultContent.hidden = true;
   resultEmpty.hidden = false;
   placeholder.hidden = true;
@@ -194,7 +212,39 @@ function renderResult(outcome: DemoOutcome): void {
   title.textContent = outcome.title;
   if (outcome.kind === "feedback") {
     resultBody.textContent = outcome.summary;
-    placeholder.hidden = false;
+    if (outcome.correctionImage.kind === "provided") {
+      const asset = outcome.correctionImage;
+      const token = imageGeneration;
+      const selected = photo?.selectionId;
+      const generation = requestGeneration;
+      const current = () => token === imageGeneration && selected === photo?.selectionId && generation === requestGeneration;
+      imageContainer.hidden = false;
+      imageStatus.textContent = "HTTP 연결 검증용 합성 이미지를 불러오고 있습니다…";
+      const loaded = () => {
+        if (!current()) return;
+        if (correctionImage.naturalWidth !== asset.width || correctionImage.naturalHeight !== asset.height) {
+          correctionImage.hidden = true;
+          imageStatus.textContent = "결과 이미지 크기가 모의 응답과 다릅니다. 다시 시도해 주세요.";
+          return;
+        }
+        correctionImage.hidden = false;
+        imageStatus.textContent = "HTTP 연결 검증용 합성 PNG · 선택한 사진의 교정 결과가 아닙니다.";
+      };
+      const failed = () => {
+        if (!current()) return;
+        correctionImage.hidden = true;
+        imageStatus.textContent = "결과 이미지를 불러오지 못했습니다. 안내 내용은 유지되며 다시 시도할 수 있습니다.";
+      };
+      correctionImage.addEventListener("load", loaded);
+      correctionImage.addEventListener("error", failed);
+      detachImageHandlers = () => {
+        correctionImage.removeEventListener("load", loaded);
+        correctionImage.removeEventListener("error", failed);
+      };
+      correctionImage.src = asset.url;
+    } else {
+      placeholder.hidden = false;
+    }
     details.hidden = false;
     for (const item of outcome.details) {
       const paragraph = document.createElement("p");
@@ -215,18 +265,20 @@ async function showResult(): Promise<void> {
   const controller = new AbortController();
   const requestId = crypto.randomUUID();
   const selectedScenario = scenario.value as DemoScenario;
+  const http = transport.value === "http";
   requestController = controller;
   resetResult();
   updateControls();
-  message("모의 응답을 준비하고 있습니다… 사진은 서버로 전송되지 않습니다.");
+  message(http ? "localhost 모의 서버 전송 중 · 실제 분석 없음" : "모의 응답을 준비하고 있습니다… 사진은 서버로 전송되지 않습니다.");
   try {
-    const outcome = await runMock({ file: selected.file, requestId, scenario: selectedScenario, signal: controller.signal });
+    const run = http ? runPrototypeHttp : runMock;
+    const outcome = await run({ file: selected.file, requestId, scenario: selectedScenario, signal: controller.signal });
     if (generation !== requestGeneration || photo?.selectionId !== selected.selectionId || controller.signal.aborted || outcome.requestId !== requestId) return;
     renderResult(outcome);
     message(`${outcome.title}를 표시했습니다. 실제 사진 분석 결과는 아닙니다.`);
   } catch (error) {
     if (generation !== requestGeneration || controller.signal.aborted) return;
-    message(error instanceof DOMException && error.name === "AbortError" ? "모의 요청을 취소했습니다." : "모의 화면을 표시하지 못했습니다. 다시 시도해 주세요.");
+    message(error instanceof DOMException && error.name === "AbortError" ? "모의 요청을 취소했습니다." : http && error instanceof Error ? error.message : "모의 화면을 표시하지 못했습니다. 다시 시도해 주세요.");
   } finally {
     if (generation === requestGeneration) {
       requestController = null;
@@ -264,6 +316,14 @@ dropZone.addEventListener("drop", (event) => {
 replaceButton.addEventListener("click", () => input.click());
 clearButton.addEventListener("click", clearPhoto);
 showButton.addEventListener("click", () => void showResult());
+transport.addEventListener("change", () => {
+  invalidateRequest();
+  resetResult();
+  updateControls();
+  const http = transport.value === "http";
+  transportNotice.textContent = http ? "localhost 모의 서버 전송 · 실제 분석 없음" : "화면 검증용 모의 응답 · 서버 전송 없음";
+  message(http ? "localhost 모의 연결을 선택했습니다. 결과 보기 시 실제 파일을 로컬 서버로 전송합니다." : "브라우저 모의 연결을 선택했습니다. 사진을 서버로 전송하지 않습니다.");
+});
 cancelButton.addEventListener("click", () => {
   invalidateRequest();
   resetResult();
