@@ -79,6 +79,16 @@ h1 { margin: 0 0 16px; font-size: clamp(30px, 3.2vw, 43px); line-height: 1.35; f
 .result-content { border-top: 1px solid var(--border); padding-top: 18px; }
 .feedback-title { font-size: 21px; margin: 0 0 12px; line-height: 1.5; letter-spacing: -.65px; }
 .result-body { color: #647568; font-size: 13px; line-height: 1.9; }
+.feedback-bullets { margin: 0; padding-left: 22px; overflow-wrap: anywhere; }
+.feedback-bullets li + li { margin-top: 9px; }
+.correction-image { display: block; width: 100%; max-width: 100%; height: auto; object-fit: contain; }
+#result-image-container { padding: 12px; }
+.correction-dialog { width: min(1200px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 16px; border: 1px solid var(--border); border-radius: 14px; color: #243b34; background: #fffefa; overflow: auto; overscroll-behavior: contain; }
+.correction-dialog::backdrop { background: #14271bcc; }
+.dialog-heading { position: sticky; top: -16px; display: flex; justify-content: space-between; align-items: center; gap: 16px; background: #fffefa; padding: 8px 0; }
+.dialog-heading h2 { margin: 0; font-size: 18px; }
+.dialog-heading button { flex-shrink: 0; }
+.correction-dialog > p { font-size: 13px; line-height: 1.7; }
 .image-placeholder { display: grid; place-items: center; min-height: 155px; border: 1px dashed #d3d9cc; border-radius: 11px; background: #f5f6f0; color: #607059; padding: 20px; text-align: center; margin: 18px 0; font-size: 12px; line-height: 1.8; }
 .details { padding: 15px 0 0; margin-top: 18px; border-top: 1px solid var(--border); color: #576d5c; font-size: 13px; line-height: 1.8; }
 .details summary { cursor: pointer; font-weight: 650; }
