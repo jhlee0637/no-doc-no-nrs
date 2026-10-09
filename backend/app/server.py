@@ -20,6 +20,7 @@ from urllib.parse import urlsplit
 from PIL import Image
 
 from .pipeline import PipelineFailure, PipelineRunner
+from .static import StaticFrontend
 
 
 SCHEMA = "local-coach-v1"
@@ -28,6 +29,10 @@ MAX_IMAGE = 5 * 1024 * 1024
 MAX_PIXELS = 12_000_000
 FIELDS = {"schema_version", "request_id", "exercise", "handedness", "reference_id", "reference_version"}
 REQUEST_ID = re.compile(r"[\x21-\x7e]{1,64}\Z")
+CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; "
+       "img-src 'self' blob: data:; font-src 'self'; connect-src 'self'; "
+       "object-src 'none'; base-uri 'none'; form-action 'none'; "
+       "frame-ancestors 'none'; worker-src 'none'")
 ERROR_MESSAGES = {
     "image_too_large": "5 MiB 및 1200만 픽셀 이하의 사진을 선택해 주세요.",
     "body_too_large": "업로드 요청은 6 MiB 이하여야 합니다. 더 작은 사진을 선택해 주세요.",
@@ -160,6 +165,8 @@ class Settings:
     allowed_origins: tuple[str, ...] = ("http://127.0.0.1:5173", "http://localhost:5173")
     cache: AssetCache | None = None
     gate: threading.Lock = field(default_factory=threading.Lock)
+    frontend_dir: Path | None = None
+    static_frontend: StaticFrontend | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self):
         for value in (self.deadline_seconds, self.asset_ttl_seconds):
@@ -173,6 +180,8 @@ class Settings:
                 raise ValueError("invalid_origin")
         if self.cache is None:
             self.cache = AssetCache(self.asset_ttl_seconds)
+        if self.frontend_dir is not None:
+            self.static_frontend = StaticFrontend(self.frontend_dir)
 
     @property
     def reference(self):
@@ -210,12 +219,18 @@ def build_server(settings=None, *, port=8000):
             # No request paths, uploaded filenames, or provider logs on console.
             pass
 
+        def end_headers(self):
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Content-Security-Policy", CSP)
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Referrer-Policy", "no-referrer")
+            super().end_headers()
+
         def send_content(self, status, content, content_type):
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(content)))
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Connection", "close")
             self.end_headers()
             self.close_connection = True
@@ -233,11 +248,19 @@ def build_server(settings=None, *, port=8000):
             self.send_json(status, value)
 
         def origin_allowed(self):
+            # BaseHTTPRequestHandler normalizes leading // in self.path; inspect
+            # the original target so absolute/network-path forms remain blocked.
+            request_parts = self.requestline.split()
+            if len(request_parts) < 2 or not request_parts[1].startswith("/") or request_parts[1].startswith("//"):
+                return False
             hosts = {f"127.0.0.1:{self.server.server_port}", f"localhost:{self.server.server_port}"}
             raw_hosts = self.headers.get_all("Host", [])
             if len(raw_hosts) != 1 or raw_hosts[0] not in hosts:
                 return False
             origins = self.headers.get_all("Origin", [])
+            fetch_sites = self.headers.get_all("Sec-Fetch-Site", [])
+            if fetch_sites and (len(fetch_sites) != 1 or fetch_sites[0] not in ("same-origin", "same-site", "none")):
+                return False
             return not origins or (len(origins) == 1 and origins[0] in {"http://" + raw_hosts[0], *settings.allowed_origins})
 
         def do_GET(self):
@@ -249,6 +272,11 @@ def build_server(settings=None, *, port=8000):
                 return
             match = re.fullmatch(r"/api/coach/assets/([A-Za-z0-9_-]{32})\.png", self.path)
             content = settings.cache.get(match[1]) if match else None
+            if match is None and settings.static_frontend is not None:
+                static = settings.static_frontend.get(self.path)
+                if static is not None:
+                    self.send_content(200, *static)
+                    return
             if content is None:
                 self.fail("asset_not_found", 404)
                 return
@@ -338,6 +366,7 @@ def main(argv=None):
     parser.add_argument("--landmarker-model", type=Path)
     parser.add_argument("--pipeline-python", default=sys.executable)
     parser.add_argument("--allowed-origin", action="append", default=[])
+    parser.add_argument("--frontend-dir", type=Path, help="빌드된 frontend 디렉터리만 같은 origin에서 제공")
     args = parser.parse_args(argv)
     if not 1 <= args.port <= 65535:
         parser.error("port는 1~65535여야 합니다.")
@@ -346,10 +375,10 @@ def main(argv=None):
     try:
         runner = PipelineRunner(args.catalog, args.landmarker_model, python=args.pipeline_python) if args.mode == "analysis" else None
         origins = ("http://127.0.0.1:5173", "http://localhost:5173", *args.allowed_origin)
-        settings = Settings(args.mode, runner, allowed_origins=origins)
+        settings = Settings(args.mode, runner, allowed_origins=origins, frontend_dir=args.frontend_dir)
         server = build_server(settings, port=args.port)
     except Exception:
-        parser.exit(2, "로컬 서버 설정을 확인하세요. 기준 목록·이미지·모델·인터프리터가 필요합니다.\n")
+        parser.exit(2, "로컬 서버 설정을 확인하세요. 분석 모드의 기준·모델·인터프리터와 지정한 frontend의 index.html이 필요합니다.\n")
     print(f"Local coach API: http://127.0.0.1:{args.port} (mode={args.mode}; provisional contract)")
     try:
         server.serve_forever()

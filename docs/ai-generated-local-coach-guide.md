@@ -22,7 +22,9 @@ npm run dev
 
 `http://127.0.0.1:5173/`에서 연결 방식의 localhost 파이프라인 API를 선택한다. 실제 파일이 8000 포트의 독립 서버로 전송되고 mock JSON과 별도 PNG를 받아 표시된다. 사진 분석은 실행하지 않는다. 브라우저 화면 예시와 기존 Vite HTTP fixture도 비교할 수 있다.
 
-Vite 개발 서버는 `/api/coach`를 `http://127.0.0.1:8000`으로 프록시한다. 브라우저는 같은 origin만 요청한다. 서버는 loopback에 바인딩하고 기본 GUI origin 두 개(`http://127.0.0.1:5173`, `http://localhost:5173`)를 허용한다. 배포용 CORS·인증·호스팅 구성은 포함하지 않는다. Vite build/preview는 개발 프록시나 독립 서버를 자동 제공하지 않는다.
+Vite 개발 서버는 `/api/coach`를 `http://127.0.0.1:8000`으로 프록시한다. 브라우저는 같은 origin만 요청한다. 서버는 loopback에 바인딩하고 기본 GUI origin 두 개(`http://127.0.0.1:5173`, `http://localhost:5173`)를 허용한다. 배포용 CORS·인증은 포함하지 않는다. Vite build/preview는 개발 프록시나 독립 서버를 자동 제공하지 않는다.
+
+로컬 호스팅에는 GUI를 빌드한 뒤 API 실행에 `--frontend-dir frontend/dist`를 추가하여 웹페이지와 API를 같은 8000 포트에서 제공할 수 있다. 구체적인 실행 순서·파일 접근 경계·보안 정책·검증 범위는 [localhost 호스팅 안내](ai-generated-localhost-security-guide.md)를 따른다.
 
 ## 기존 실제 파이프라인을 실행하는 설정
 

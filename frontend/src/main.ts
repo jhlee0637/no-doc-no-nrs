@@ -29,7 +29,7 @@ app.innerHTML = `
         <div id="photo-meta" class="photo-meta" hidden><strong id="file-name"></strong><span id="file-details" class="muted"></span><span class="preview-caption">선택한 원본의 브라우저 미리보기</span></div>
         <div class="actions"><button id="replace-photo" class="button button-secondary" type="button">사진 선택</button><button id="clear-photo" class="button button-secondary" type="button" disabled>사진 지우기</button></div>
         <p class="muted">손과 젓가락이 함께 보이도록 촬영하면 좋아요.</p>
-        <div class="scenario-control"><label for="demo-transport">연결 방식</label><select id="demo-transport"><option value="browser">브라우저 화면 예시 · 전송 없음</option><option value="http">localhost HTTP 모의 서버</option><option value="pipeline">localhost 파이프라인 API</option></select></div>
+        <div class="scenario-control"><label for="demo-transport">연결 방식</label><select id="demo-transport"><option value="browser">브라우저 화면 예시 · 전송 없음</option>${import.meta.env.DEV ? '<option value="http">localhost HTTP 모의 서버</option>' : ''}<option value="pipeline">localhost 파이프라인 API</option></select></div>
         <div class="scenario-control"><label for="demo-scenario">살펴볼 모의 화면</label><select id="demo-scenario"><option value="feedback">교정 안내</option><option value="retake">재촬영 안내</option><option value="error">서비스 오류</option></select></div>
         <div class="actions"><button id="show-result" class="button button-primary" type="button" disabled>모의 결과 보기 <span aria-hidden="true">→</span></button><button id="cancel-request" class="button button-secondary" type="button" hidden>취소</button></div>
         <p id="status-message" class="status" role="status" aria-live="polite" aria-atomic="true">사진을 선택하면 미리보기를 확인할 수 있습니다.</p>
