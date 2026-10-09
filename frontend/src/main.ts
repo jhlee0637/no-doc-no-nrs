@@ -5,6 +5,7 @@ import { runLocalCoach } from "./api/local-coach";
 import guideHoldOpen from "./assets/guide-hold-open.png";
 import guideHoldClosed from "./assets/guide-hold-closed.png";
 import { makeRequestId } from "./api/ai-generated-request-id";
+import { feedbackBulletItems, koreanJointLabel, translateFeedbackText } from "./ai-generated-feedback-text";
 
 const offline = import.meta.env.MODE === "offline";
 const defaultPipeline = !offline && !import.meta.env.DEV;
@@ -53,16 +54,21 @@ app.innerHTML = `
         <div id="result-content" class="result-content" hidden>
           <p id="outcome-badge" class="outcome-badge">모의 응답</p>
           <h3 id="feedback-title" class="feedback-title"></h3>
-          <p id="result-body" class="result-body"></p>
+          <div id="result-body" class="result-body"></div>
           <div id="result-image-placeholder" class="image-placeholder" hidden><strong>${offline ? "교정 이미지 화면 예시" : "교정 이미지 제공 대기"}</strong><p class="muted">${offline ? "교정 이미지가 들어갈 위치입니다. 이 파일은 실제 교정 이미지를 생성하지 않습니다." : "실제 결과 이미지가 연결되면 이곳에 표시됩니다."}</p></div>
-          <div id="result-image-container" class="image-placeholder" hidden><img id="correction-image" class="preview-image" alt="HTTP 연결 검증용 합성 이미지. 실제 교정 결과가 아닙니다." hidden /><p id="result-image-status" class="muted" role="status" aria-live="polite"></p></div>
+          <div id="result-image-container" class="image-placeholder" hidden><img id="correction-image" class="correction-image" alt="HTTP 연결 검증용 합성 이미지. 실제 교정 결과가 아닙니다." hidden /><p id="result-image-status" class="muted" role="status" aria-live="polite"></p><button id="enlarge-correction" class="button button-secondary" type="button" aria-haspopup="dialog" aria-controls="correction-dialog" hidden>이미지 크게 보기</button></div>
           <details id="feedback-details" class="details" hidden><summary id="detail-summary">관절별 안내 예시 펼치기</summary><div id="detail-list"></div></details>
           <p id="result-notice" class="notice">선택한 사진을 분석한 결과가 아닌 화면 예시입니다.</p>
         </div>
       </section>
     </div>
     <footer class="footer"><span>ChopCoach · 작은 움직임, 편안한 한 끼</span><span class="muted">${offline ? "오프라인 화면 예시 · 실제 사진 분석 없음" : "로컬 화면 검증용 프로토타입"}</span></footer>
-  </main>`;
+  </main>
+  <dialog id="correction-dialog" class="correction-dialog" aria-labelledby="correction-dialog-title">
+    <div class="dialog-heading"><h2 id="correction-dialog-title">교정 방향 이미지 크게 보기</h2><button id="close-correction" class="button button-secondary" type="button" autofocus>닫기</button></div>
+    <p id="enlarged-image-notice" class="muted"></p>
+    <img id="enlarged-correction-image" class="correction-image" alt="" />
+  </dialog>`;
 
 function element<T extends HTMLElement>(id: string): T {
   const found = document.getElementById(id);
@@ -94,6 +100,11 @@ const placeholder = element<HTMLElement>("result-image-placeholder");
 const imageContainer = element<HTMLElement>("result-image-container");
 const correctionImage = element<HTMLImageElement>("correction-image");
 const imageStatus = element<HTMLElement>("result-image-status");
+const enlargeButton = element<HTMLButtonElement>("enlarge-correction");
+const imageDialog = element<HTMLDialogElement>("correction-dialog");
+const closeImageButton = element<HTMLButtonElement>("close-correction");
+const enlargedImage = element<HTMLImageElement>("enlarged-correction-image");
+const enlargedNotice = element<HTMLElement>("enlarged-image-notice");
 const details = element<HTMLDetailsElement>("feedback-details");
 const detailList = element<HTMLElement>("detail-list");
 const detailSummary = element<HTMLElement>("detail-summary");
@@ -109,6 +120,13 @@ let decodingUrl: string | null = null;
 let imageGeneration = 0;
 let detachImageHandlers: (() => void) | null = null;
 let pipelineMode: "mock" | "analysis" | null = null;
+let verifiedImageUrl: string | null = null;
+
+function closeCorrectionImage(): void {
+  if (imageDialog.open) imageDialog.close();
+  enlargedImage.removeAttribute("src");
+  enlargedImage.alt = "";
+}
 
 function message(text: string, state: "info" | "busy" | "success" | "error" = "info"): void {
   status.textContent = text;
@@ -129,6 +147,9 @@ function updateControls(): void {
 }
 
 function resetResult(): void {
+  verifiedImageUrl = null;
+  enlargeButton.hidden = true;
+  closeCorrectionImage();
   imageGeneration += 1;
   detachImageHandlers?.();
   detachImageHandlers = null;
@@ -245,7 +266,14 @@ function renderResult(outcome: DemoOutcome): void {
     "기준사진과 비교한 관절별 안내입니다.";
   detailSummary.textContent = mock ? "관절별 안내 예시 펼치기" : "관절별 안내 펼치기";
   if (outcome.kind === "feedback") {
-    resultBody.textContent = outcome.summary;
+    const list = document.createElement("ul");
+    list.className = "feedback-bullets";
+    for (const text of feedbackBulletItems(outcome.summary)) {
+      const item = document.createElement("li");
+      item.textContent = text;
+      list.append(item);
+    }
+    resultBody.replaceChildren(list);
     if (outcome.correctionImage.kind === "provided") {
       const asset = outcome.correctionImage;
       const token = imageGeneration;
@@ -258,16 +286,24 @@ function renderResult(outcome: DemoOutcome): void {
       const loaded = () => {
         if (!current()) return;
         if (correctionImage.naturalWidth !== asset.width || correctionImage.naturalHeight !== asset.height) {
+          verifiedImageUrl = null;
+          enlargeButton.hidden = true;
+          closeCorrectionImage();
           correctionImage.hidden = true;
           imageStatus.textContent = "결과 이미지 크기가 서버 응답과 다릅니다. 다시 시도해 주세요.";
           return;
         }
         correctionImage.hidden = false;
+        verifiedImageUrl = asset.url;
+        enlargeButton.hidden = false;
         imageStatus.textContent = mock ? "HTTP 연결 검증용 합성 PNG · 선택한 사진의 교정 결과가 아닙니다." :
           "서버가 제공한 교정 방향 안내 이미지";
       };
       const failed = () => {
         if (!current()) return;
+        verifiedImageUrl = null;
+        enlargeButton.hidden = true;
+        closeCorrectionImage();
         correctionImage.hidden = true;
         imageStatus.textContent = "결과 이미지를 불러오지 못했습니다. 안내 내용은 유지되며 다시 시도할 수 있습니다.";
       };
@@ -285,12 +321,12 @@ function renderResult(outcome: DemoOutcome): void {
     for (const item of outcome.details) {
       const paragraph = document.createElement("p");
       const label = document.createElement("strong");
-      label.textContent = item.label;
-      paragraph.append(label, document.createElement("br"), document.createTextNode(item.text));
+      label.textContent = koreanJointLabel(item.label);
+      paragraph.append(label, document.createElement("br"), document.createTextNode(translateFeedbackText(item.text)));
       detailList.append(paragraph);
     }
   } else {
-    resultBody.textContent = outcome.message;
+    resultBody.textContent = translateFeedbackText(outcome.message);
   }
 }
 
@@ -359,6 +395,23 @@ dropZone.addEventListener("drop", (event) => {
 });
 replaceButton.addEventListener("click", () => input.click());
 clearButton.addEventListener("click", clearPhoto);
+enlargeButton.addEventListener("click", () => {
+  if (!verifiedImageUrl || correctionImage.hidden || imageDialog.open) return;
+  enlargedImage.alt = correctionImage.alt;
+  enlargedNotice.textContent = imageStatus.textContent;
+  enlargedImage.src = verifiedImageUrl;
+  imageDialog.showModal();
+});
+closeImageButton.addEventListener("click", closeCorrectionImage);
+imageDialog.addEventListener("close", () => {
+  if (imageDialog.open) return;
+  enlargedImage.removeAttribute("src");
+  enlargedImage.alt = "";
+  if (verifiedImageUrl && !enlargeButton.hidden) enlargeButton.focus();
+});
+enlargedImage.addEventListener("error", () => {
+  if (imageDialog.open) enlargedNotice.textContent = "확대 이미지를 불러오지 못했습니다. 창을 닫고 결과 보기를 다시 시도해 주세요.";
+});
 showButton.addEventListener("click", () => void showResult());
 transport.addEventListener("change", () => {
   invalidateRequest();
@@ -389,6 +442,7 @@ window.addEventListener("pagehide", (event) => {
   selectionId += 1;
   invalidateRequest();
   releasePhoto();
+  resetResult();
 });
 
 // Hosted builds start with the analysis server; offline and development remain browser demos.
