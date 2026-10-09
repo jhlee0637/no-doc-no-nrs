@@ -10,6 +10,7 @@ import unittest
 from PIL import Image
 
 from backend.app.server import AssetCache, SCHEMA, Settings, build_server
+from backend.app.pipeline import PipelineFailure
 
 
 def png():
@@ -130,6 +131,61 @@ class HttpTests(unittest.TestCase):
             self.settings.gate.release()
         self.assertEqual((status, value["error"]["code"], value["request_id"]), (503, "busy", "request-123"))
         self.assertEqual(self.request("/api/coach/assets/" + "a" * 32 + ".png")[0], 404)
+
+    def poll_job_until_complete(self, url):
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            status, _, body = self.request(url)
+            value = json.loads(body)
+            if status != 202:
+                return status, value
+            time.sleep(.01)
+        self.fail("async worker did not complete")
+
+    def test_async_accepts_pending_then_feedback_and_rejects_busy_upload(self):
+        entered, release = threading.Event(), threading.Event()
+        self.addCleanup(release.set)
+        class Runner:
+            reference = {"id": "async-reference", "version": "1"}
+            def run(self, content, *, timeout=None):
+                entered.set()
+                if not release.wait(2):
+                    raise PipelineFailure('timeout')
+                return {"source": "analysis", "outcome": "feedback", "feedback": {
+                    "status": "assessable", "comment": "안내", "corrections": [],
+                    "image": {"mime_type": "image/png", "width": 12, "height": 8}}}, png()
+        self.settings.mode, self.settings.runner = 'analysis', Runner()
+        status, _, value = self.analyze(reference=self.settings.reference, headers={'X-Coach-Async':'1'})
+        self.assertEqual((status, value['status'], value['request_id']), (202, 'pending', 'request-123'))
+        self.assertRegex(value['job_url'], r'^/api/coach/jobs/[A-Za-z0-9_-]{32}$')
+        self.assertTrue(entered.wait(1))
+        status, _, body = self.request(value['job_url'])
+        self.assertEqual((status, json.loads(body)['status']), (202, 'pending'))
+        busy, _, result = self.analyze(reference=self.settings.reference, headers={'X-Coach-Async':'1'})
+        self.assertEqual((busy, result['error']['code']), (503, 'busy'))
+        release.set()
+        status, result = self.poll_job_until_complete(value['job_url'])
+        self.assertEqual((status, result['outcome'], result['request_id']), (200, 'feedback', 'request-123'))
+        self.assertIsNone(result['error'])
+        self.assertEqual(self.request(result['feedback']['image']['url'])[0], 200)
+        self.assertTrue(self.settings.gate.acquire(blocking=False))
+        self.settings.gate.release()
+
+    def test_async_worker_failure_is_safe_and_releases_gate(self):
+        class Runner:
+            reference = {"id": "async-reference", "version": "1"}
+            def run(self, content, *, timeout=None):
+                raise RuntimeError('secret original provider body')
+        self.settings.mode, self.settings.runner = 'analysis', Runner()
+        status, _, accepted = self.analyze(reference=self.settings.reference, headers={'X-Coach-Async':'1'})
+        self.assertEqual(status, 202)
+        status, result = self.poll_job_until_complete(accepted['job_url'])
+        self.assertEqual((status, result['outcome'], result['error']['code']), (502, 'error', 'pipeline_failed'))
+        self.assertIsNone(result['feedback'])
+        self.assertIsNone(result['retake'])
+        self.assertNotIn('secret original', json.dumps(result))
+        self.assertTrue(self.settings.gate.acquire(blocking=False))
+        self.settings.gate.release()
 
     def test_cache_ttl_and_bounded_eviction(self):
         now = [100.0]
