@@ -109,7 +109,7 @@ def collect(args, since=None):
             first_line = body.splitlines()[0].strip() if body.splitlines() else ''
             eligible = (author.lower() in args.allow_author
                         and author.lower() not in args.ignore_author
-                        and first_line == f'@agent:{args.recipient}')
+                        and first_line == f'agent:{args.recipient}')
             events.append({'key': key, 'kind': kind, 'id': row['id'], 'number': number,
                            'author': author, 'updated_at': updated, 'url': url,
                            'body_sha256': digest, 'eligible': eligible})
@@ -242,8 +242,8 @@ def validate(args):
         raise MonitorError('작성자 계정 이름이 올바르지 않습니다.')
     args.allow_author = {login.lower() for login in args.allow_author}
     args.ignore_author = {login.lower() for login in args.ignore_author}
-    if args.interval < 30:
-        raise MonitorError('감시 간격은 최소 30초입니다.')
+    if args.interval < 15:
+        raise MonitorError('감시 간격은 최소 15초입니다.')
 
 
 def main(argv=None):

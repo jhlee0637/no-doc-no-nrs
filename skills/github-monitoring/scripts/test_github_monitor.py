@@ -27,7 +27,7 @@ class MonitorTests(unittest.TestCase):
         self.output = io.StringIO()
         self.errors = io.StringIO()
 
-    def row(self, kind='issues/comments', author='trusted', body='@agent:reviewer\n2 + 3', ident=10):
+    def row(self, kind='issues/comments', author='trusted', body='agent:reviewer\n2 + 3', ident=10):
         row = {'id': ident, 'body': body, 'user': {'login': author},
                'updated_at': monitor.stamp(monitor.utc_now()), 'number': 1}
         if kind == 'issues/comments':
@@ -88,8 +88,8 @@ class MonitorTests(unittest.TestCase):
         self.initialize()
         self.row(author='outsider', ident=1)
         self.row(author='self', ident=2)
-        self.row(body='@agent:builder\n2 + 3', ident=3)
-        self.row(body='quoted\n@agent:reviewer', ident=4)
+        self.row(body='agent:builder\n2 + 3', ident=3)
+        self.row(body='quoted\nagent:reviewer', ident=4)
         self.row(author='TRUSTED', ident=5)
         self.assertEqual(self.run_mode(), 0)
         self.assertIn('"count": 1', self.output.getvalue())
@@ -151,8 +151,26 @@ class MonitorTests(unittest.TestCase):
         self.assertFalse(self.state.parent.exists())
 
     def test_invalid_options_fail_before_commands(self):
-        self.assertEqual(self.run_mode(extra=('--interval', '1')), 1)
+        self.assertEqual(self.run_mode(extra=('--interval', '14')), 1)
         self.assertFalse(self.calls)
+
+    def test_fifteen_second_watch_detects_new_request_without_ai(self):
+        self.initialize()
+        self.row()
+        with patch.object(monitor.time, 'sleep', side_effect=KeyboardInterrupt) as sleep:
+            self.assertEqual(self.run_mode('watch', extra=('--interval', '15')), 130)
+        sleep.assert_called_once_with(15)
+        self.assertIn('"status": "request"', self.output.getvalue())
+        self.assertTrue(all(call[:2] == ['gh', 'api'] for call in self.calls))
+
+    def test_mention_marker_is_ignored_and_plain_marker_is_detected(self):
+        self.initialize()
+        self.row(body='@agent:reviewer\nold format', ident=1)
+        self.row(body='agent:reviewer\nnew format', ident=2)
+        self.assertEqual(self.run_mode(), 0)
+        events = [json.loads(line) for line in self.output.getvalue().splitlines()]
+        requests = [event for event in events if event['status'] == 'request']
+        self.assertEqual([event['event']['id'] for event in requests], [2])
 
     def test_watch_without_requests_never_invokes_ai(self):
         self.initialize()
@@ -199,7 +217,7 @@ class MonitorTests(unittest.TestCase):
 
     def test_request_output_is_metadata_only_and_read_only(self):
         self.initialize()
-        self.row(body='@agent:reviewer\nuntrusted shell input')
+        self.row(body='agent:reviewer\nuntrusted shell input')
         self.assertEqual(self.run_mode(), 0)
         events = [json.loads(line) for line in self.output.getvalue().splitlines()]
         request = next(event for event in events if event['status'] == 'request')
