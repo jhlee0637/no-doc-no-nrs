@@ -10,7 +10,7 @@ import sys
 import urllib.error
 import urllib.request
 
-from PIL import Image, ImageDraw, ImageOps
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 
 def obj(properties):
@@ -230,7 +230,25 @@ def render(image, assessment):
         # Cyan target circles differ from red current landmarks and green bones.
         draw.ellipse((x-radius, y-radius, x+radius, y+radius),
                      fill="#00cfff", outline="black", width=max(2, radius // 8))
-        draw.text((x, y), str(correction["landmark_id"]), fill="black", anchor="mm")
+        label = str(correction["landmark_id"])
+        font = ImageFont.load_default()
+        # Move only the label; preserve target point and arrow geometry.
+        box = draw.textbbox((x, y), label, font=font, anchor="mm")
+        if box[2] - box[0] > width or box[3] - box[1] > height:
+            # Scale text to fit small images without silently clipping digits.
+            size = 10
+            while size > 1:
+                font = ImageFont.load_default(size=size)
+                box = draw.textbbox((x, y), label, font=font, anchor="mm")
+                if box[2] - box[0] <= width and box[3] - box[1] <= height:
+                    break
+                size -= 1
+            else:
+                font = ImageFont.load_default(size=1)
+                box = draw.textbbox((x, y), label, font=font, anchor="mm")
+        label_x = x + max(0, -box[0]) - max(0, box[2] - width)
+        label_y = y + max(0, -box[1]) - max(0, box[3] - height)
+        draw.text((label_x, label_y), label, font=font, fill="black", anchor="mm")
     return result
 
 

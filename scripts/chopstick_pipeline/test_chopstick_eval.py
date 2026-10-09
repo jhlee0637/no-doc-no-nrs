@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from PIL import Image
+from PIL import Image, ImageDraw
 import evaluate_chopsticks as app
 
 
@@ -95,6 +95,47 @@ class EvaluationTests(unittest.TestCase):
         self.assertEqual(rendered.getpixel((320, 94)), cyan)   # target circle away from label
         self.assertEqual(rendered.getpixel((80, 90)), (255, 255, 255))  # no target circle at start
         self.assertEqual(image.getpixel((200, 100)), (255, 255, 255))   # source preserved
+
+    def assert_target_label_inside_image(self, size, target):
+        value = sample()
+        value["corrections"][0].update(landmark_id=18, target=dict(target))
+        original_target = copy.deepcopy(value["corrections"][0]["target"])
+        records = []
+        original_text = ImageDraw.ImageDraw.text
+
+        def record_text(draw, xy, text, *args, **kwargs):
+            box = draw.textbbox(xy, text, font=kwargs.get("font"),
+                                anchor=kwargs.get("anchor"),
+                                stroke_width=kwargs.get("stroke_width", 0))
+            records.append((text, box))
+            return original_text(draw, xy, text, *args, **kwargs)
+
+        image = Image.new("RGB", size, "white")
+        with patch.object(ImageDraw.ImageDraw, "text", new=record_text):
+            rendered = app.render(image, value)
+        self.assertEqual(rendered.size, size)
+        self.assertEqual(len(records), 1)
+        text, (left, top, right, bottom) = records[0]
+        self.assertEqual(text, "18")
+        self.assertGreaterEqual(left, 0)
+        self.assertGreaterEqual(top, 0)
+        self.assertLessEqual(right, size[0])
+        self.assertLessEqual(bottom, size[1])
+        self.assertGreater(right, left)
+        self.assertGreater(bottom, top)
+        self.assertEqual(value["corrections"][0]["target"], original_target)
+
+    def test_target_labels_fit_at_each_image_edge(self):
+        targets = ({"x": 0, "y": .5}, {"x": 1, "y": .5},
+                   {"x": .5, "y": 0}, {"x": .5, "y": 1})
+        for target in targets:
+            with self.subTest(target=target):
+                self.assert_target_label_inside_image((200, 100), target)
+
+    def test_target_labels_fit_tiny_image_corners(self):
+        for x, y in ((0, 0), (1, 0), (0, 1), (1, 1)):
+            with self.subTest(x=x, y=y):
+                self.assert_target_label_inside_image((8, 6), {"x": x, "y": y})
 
     def test_hidden_target_does_not_change_image(self):
         value = sample()
