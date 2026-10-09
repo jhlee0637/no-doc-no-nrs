@@ -1,0 +1,11 @@
+{
+  "name": "Noto Sans KR",
+  "source": "https://github.com/google/fonts/tree/main/ofl/notosanskr",
+  "original_file": "NotoSansKR[wght].ttf",
+  "local_file": "NotoSansKR.ttf",
+  "license": "SIL Open Font License 1.1",
+  "license_file": "OFL.txt",
+  "font_data_modified": false,
+  "added_date": "2026-10-09",
+  "use": "Local Korean GUI text rendering; third-party asset added during prototype implementation."
+}
