@@ -1,0 +1,24 @@
+# Verified runtime: Python 3.12, Linux x86_64.
+# Python itself, conda and system shared libraries are not pip requirements.
+# Direct dependencies
+mediapipe==0.10.35
+numpy==2.5.3
+Pillow==12.3.0
+
+# Pinned transitive dependencies from the working environment
+opencv-contrib-python==5.0.0.93
+absl-py==2.5.0
+certifi==2026.7.22
+flatbuffers==25.12.19
+matplotlib==3.11.2
+sounddevice==0.5.6
+cffi==2.1.1
+pycparser==3.1
+contourpy==1.4.0
+cycler==0.12.1
+fonttools==4.66.1
+kiwisolver==1.5.1
+packaging==26.3
+pyparsing==3.3.3
+python-dateutil==2.9.0.post0
+six==1.17.0
