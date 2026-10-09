@@ -377,7 +377,7 @@ def group_alive(pid):
 
 
 def stop_child(process, grace=3):
-    """Signal only the process group created for this run, not arbitrary seats."""
+    """Signal only the process group created for this run, not unrelated processes."""
     def signal_group(sig):
         try:
             os.killpg(process.pid, sig)

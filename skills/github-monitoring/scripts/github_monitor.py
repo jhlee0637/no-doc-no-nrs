@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only GitHub request monitor; optional local OpenRig notifications."""
+"""Read-only GitHub request monitor with local JSON output."""
 
 import argparse
 from contextlib import contextmanager
@@ -33,10 +33,10 @@ def emit(value):
     print(json.dumps(value, ensure_ascii=False), flush=True)
 
 
-def run_json(argv, env=None):
+def run_json(argv):
     try:
         result = subprocess.run(argv, capture_output=True, text=True, timeout=30,
-                                check=False, shell=False, env=env)
+                                check=False, shell=False)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise MonitorError('명령 실행 실패 또는 시간 초과; 원본 출력은 공개하지 않습니다.') from exc
     if result.returncode:
@@ -118,9 +118,7 @@ def collect(args, since=None):
 
 def binding(args):
     return {'repo': args.repo, 'recipient': args.recipient,
-            'allow_author': sorted(args.allow_author), 'ignore_author': sorted(args.ignore_author),
-            'seat': args.seat if args.deliver else None,
-            'rig_bin': args.rig_bin if args.deliver else None}
+            'allow_author': sorted(args.allow_author), 'ignore_author': sorted(args.ignore_author)}
 
 
 def load_state(path):
@@ -128,12 +126,14 @@ def load_state(path):
         state = json.loads(path.read_text(encoding='utf-8'))
     except (OSError, json.JSONDecodeError) as exc:
         raise MonitorError('상태를 읽을 수 없습니다. 삭제·재초기화하지 말고 확인하세요.') from exc
-    if (not isinstance(state, dict) or state.get('version') != 1
+    if isinstance(state, dict) and state.get('version') != 2:
+        raise MonitorError('이전 버전 상태는 보존하고 별도 새 상태 파일로 기준선을 설정하세요.')
+    if (not isinstance(state, dict) or state.get('version') != 2
             or not isinstance(state.get('seen'), dict)
             or not isinstance(state.get('binding'), dict)
             or not isinstance(state.get('cursor'), str)):
         raise MonitorError('상태 형식이 올바르지 않습니다.')
-    if any(v not in ('baseline', 'ignored', 'notified', 'in_flight', 'delivered')
+    if any(v not in ('baseline', 'ignored', 'notified')
            for v in state['seen'].values()):
         raise MonitorError('알 수 없는 처리 상태입니다.')
     return state
@@ -172,19 +172,6 @@ def writer_lock(path):
         os.close(fd)
 
 
-def notify(args, event):
-    # Send a bounded local notice, never GitHub body text or shell commands.
-    notice = ('GitHub 새 요청 알림. github-monitoring 스킬에 따라 원본과 현재 권한을 '
-              '확인하세요. 이 알림은 작업 실행·공개 쓰기 승인이나 완료 증거가 아닙니다. '
-              '요청 ID와 원본 해시로 중복·편집을 확인하세요.\n'
-              + json.dumps({k: v for k, v in event.items() if k != 'eligible'}, ensure_ascii=False))
-    environment = {**os.environ, 'OPENRIG_HOST_SELECTED': 'local'}
-    result = run_json([args.rig_bin, 'send', args.seat, notice, '--raw', '--json'],
-                      env=environment)
-    if not isinstance(result, dict) or result.get('delivered') is not True:
-        raise MonitorError('전달 결과 미확인; 수신 기록을 확인하기 전 재전송하지 마세요.')
-
-
 def poll(args, preview=False):
     path = Path(args.state)
     started = stamp(utc_now())
@@ -192,17 +179,14 @@ def poll(args, preview=False):
         if preview:
             raise MonitorError('기준선이 없습니다. 먼저 once로 초기화하세요.')
         events = collect(args)
-        state = {'version': 1, 'binding': binding(args), 'cursor': started,
+        state = {'version': 2, 'binding': binding(args), 'cursor': started,
                  'seen': {event['key']: 'baseline' for event in events}}
         save_state(path, state)
         emit({'status': 'baseline', 'count': len(events), 'cursor': started})
         return
     state = load_state(path)
     if state['binding'] != binding(args):
-        raise MonitorError('설정이 기존 상태와 다릅니다. 모드·담당자별 별도 상태 파일을 사용하세요.')
-    unresolved = [key for key, value in state['seen'].items() if value == 'in_flight']
-    if unresolved:
-        raise MonitorError('미확인 전달이 남아 있습니다. status와 수신 기록을 확인하세요.')
+        raise MonitorError('설정이 기존 상태와 다릅니다. 저장소·담당자별 별도 상태 파일을 사용하세요.')
     try:
         since = stamp(datetime.fromisoformat(state['cursor'].replace('Z', '+00:00'))
                       - timedelta(seconds=120))
@@ -222,15 +206,8 @@ def poll(args, preview=False):
         if preview:
             emit({'status': 'preview', 'event': {k: v for k, v in event.items() if k != 'eligible'}})
             continue
-        if args.deliver:
-            state['seen'][key] = 'in_flight'
-            save_state(path, state)
-            notify(args, event)
-            state['seen'][key] = 'delivered'
-            save_state(path, state)
-        else:
-            emit({'status': 'request', 'event': {k: v for k, v in event.items() if k != 'eligible'}})
-            state['seen'][key] = 'notified'
+        emit({'status': 'request', 'event': {k: v for k, v in event.items() if k != 'eligible'}})
+        state['seen'][key] = 'notified'
     if not preview:
         state['cursor'] = started
         save_state(path, state)
@@ -246,10 +223,7 @@ def parser():
     result.add_argument('--ignore-author', action='append', default=[])
     result.add_argument('--state', required=True, help='private, Git-ignored state file')
     result.add_argument('--interval', type=int, default=60)
-    result.add_argument('--deliver', action='store_true', help='opt in to local OpenRig notification')
-    result.add_argument('--seat')
     result.add_argument('--gh-bin', default='gh', help='single executable, not a shell expression')
-    result.add_argument('--rig-bin', default='rig', help='single executable, not a shell expression')
     return result
 
 
@@ -270,12 +244,6 @@ def validate(args):
     args.ignore_author = {login.lower() for login in args.ignore_author}
     if args.interval < 30:
         raise MonitorError('감시 간격은 최소 30초입니다.')
-    if args.deliver and (not args.seat or not re.fullmatch(
-            r'[A-Za-z0-9_][A-Za-z0-9_.-]*@[A-Za-z0-9_][A-Za-z0-9_.-]*', args.seat)
-                         or args.seat.startswith('-')):
-        raise MonitorError('--deliver에는 유효한 로컬 --seat가 필요합니다.')
-    if args.seat and not args.deliver:
-        raise MonitorError('--seat는 --deliver와 함께 사용하세요.')
 
 
 def main(argv=None):
@@ -284,8 +252,7 @@ def main(argv=None):
         validate(args)
         if args.mode == 'status':
             state = load_state(Path(args.state))
-            emit({'status': 'checkpoint', 'cursor': state['cursor'], 'seen': len(state['seen']),
-                  'in_flight': [key for key, value in state['seen'].items() if value == 'in_flight']})
+            emit({'status': 'checkpoint', 'cursor': state['cursor'], 'seen': len(state['seen'])})
         elif args.mode == 'check':
             poll(args, preview=True)
         else:

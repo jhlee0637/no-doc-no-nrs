@@ -1,4 +1,4 @@
-"""Offline behavior tests: no GitHub login, network, or real rig invocation."""
+"""Offline behavior tests: no GitHub login, network, or AI invocation."""
 
 from contextlib import redirect_stdout, redirect_stderr
 from datetime import timedelta
@@ -21,7 +21,6 @@ class MonitorTests(unittest.TestCase):
         self.state = Path(self.directory.name) / 'private' / 'state.json'
         self.rows = {'issues': [], 'issues/comments': [], 'pulls/comments': []}
         self.calls = []
-        self.rig_receipt = {'delivered': True}
         self.argv = ['--repo', 'example/project', '--recipient', 'reviewer',
                      '--allow-author', 'trusted', '--ignore-author', 'self',
                      '--state', str(self.state)]
@@ -41,9 +40,8 @@ class MonitorTests(unittest.TestCase):
     def command(self, argv, **kwargs):
         self.calls.append(argv)
         self.assertFalse(kwargs['shell'])
-        if argv[0] == 'rig':
-            self.assertEqual(kwargs['env']['OPENRIG_HOST_SELECTED'], 'local')
-            return subprocess.CompletedProcess(argv, 0, json.dumps(self.rig_receipt), '')
+        self.assertEqual(argv[0], 'gh')
+        self.assertEqual(argv[1], 'api')
         self.assertEqual(argv[argv.index('--method') + 1], 'GET')
         self.assertIn('--paginate', argv)
         suffix = argv[-1].split('?', 1)[0].split('example/project/', 1)[1]
@@ -62,14 +60,11 @@ class MonitorTests(unittest.TestCase):
         self.output.seek(0)
         self.output.truncate()
 
-    def rig_calls(self):
-        return [call for call in self.calls if call[0] == 'rig']
-
-    def test_baseline_does_not_replay_or_send(self):
+    def test_baseline_does_not_replay_requests(self):
         self.row()
-        self.initialize(extra=('--deliver', '--seat', 'reviewer@demo'))
-        self.assertEqual(self.run_mode(extra=('--deliver', '--seat', 'reviewer@demo')), 0)
-        self.assertFalse(self.rig_calls())
+        self.initialize()
+        self.assertEqual(self.run_mode(), 0)
+        self.assertNotIn('"status": "request"', self.output.getvalue())
         self.assertIn('baseline', set(monitor.load_state(self.state)['seen'].values()))
 
     def test_preview_keeps_state_and_never_delivers(self):
@@ -78,7 +73,6 @@ class MonitorTests(unittest.TestCase):
         before = self.state.read_bytes()
         self.assertEqual(self.run_mode('check'), 0)
         self.assertEqual(self.state.read_bytes(), before)
-        self.assertFalse(self.rig_calls())
         self.assertIn('preview', self.output.getvalue())
 
     def test_deduplicates_across_restarts(self):
@@ -126,42 +120,6 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(self.run_mode(), 0)
         self.assertIn('"count": 1', self.output.getvalue())
 
-    def test_delivery_is_metadata_only_and_no_shell(self):
-        extra = ('--deliver', '--seat', 'reviewer@demo')
-        self.initialize(extra=extra)
-        self.row(body='@agent:reviewer\n$(dangerous-command) `secret`')
-        self.assertEqual(self.run_mode(extra=extra), 0)
-        self.assertEqual(len(self.rig_calls()), 1)
-        self.assertNotIn('dangerous-command', self.rig_calls()[0][3])
-        self.assertIn('delivered', set(monitor.load_state(self.state)['seen'].values()))
-        self.assertEqual(self.run_mode(extra=extra), 0)
-        self.assertEqual(len(self.rig_calls()), 1)
-
-    def test_ambiguous_delivery_stops_and_restart_does_not_retry(self):
-        extra = ('--deliver', '--seat', 'reviewer@demo')
-        self.initialize(extra=extra)
-        self.row()
-        self.rig_receipt = {'delivered': False}
-        self.assertEqual(self.run_mode(extra=extra), 1)
-        self.assertIn('in_flight', set(monitor.load_state(self.state)['seen'].values()))
-        self.assertEqual(self.run_mode(extra=extra), 1)
-        self.assertEqual(len(self.rig_calls()), 1)
-
-    def test_timeout_keeps_in_flight_marker(self):
-        extra = ('--deliver', '--seat', 'reviewer@demo')
-        self.initialize(extra=extra)
-        self.row()
-        original = self.command
-
-        def timeout(argv, **kwargs):
-            if argv[0] == 'rig':
-                raise subprocess.TimeoutExpired(argv, 30)
-            return original(argv, **kwargs)
-
-        with patch.object(self, 'command', side_effect=timeout):
-            self.assertEqual(self.run_mode(extra=extra), 1)
-        self.assertIn('in_flight', set(monitor.load_state(self.state)['seen'].values()))
-
     def test_api_failure_does_not_advance_or_leak_stderr(self):
         self.initialize()
         before = self.state.read_bytes()
@@ -176,10 +134,12 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(self.run_mode(), 1)
         self.assertEqual(self.state.read_text(), 'broken')
 
-    def test_mode_change_rejected(self):
+    def test_binding_change_rejected_without_state_change(self):
         self.initialize()
-        self.assertEqual(self.run_mode(extra=('--deliver', '--seat', 'reviewer@demo')), 1)
-        self.assertFalse(self.rig_calls())
+        before = self.state.read_bytes()
+        self.assertEqual(self.run_mode(extra=('--recipient', 'builder')), 1)
+        self.assertEqual(self.state.read_bytes(), before)
+        self.assertFalse(self.calls)
 
     def test_writer_lock_prevents_second_process(self):
         with monitor.writer_lock(self.state):
@@ -198,7 +158,8 @@ class MonitorTests(unittest.TestCase):
         self.initialize()
         with patch.object(monitor.time, 'sleep', side_effect=KeyboardInterrupt):
             self.assertEqual(self.run_mode('watch'), 130)
-        self.assertFalse(self.rig_calls())
+        self.assertTrue(self.calls)
+        self.assertTrue(all(call[:2] == ['gh', 'api'] for call in self.calls))
 
     def test_overlap_and_query_start_checkpoint(self):
         self.initialize()
@@ -235,17 +196,66 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(self.state.stat().st_mode & 0o777, 0o600)
         self.assertEqual(self.state.parent.stat().st_mode & 0o777, 0o700)
 
-    def test_remote_target_sugar_rejected(self):
-        self.assertEqual(self.run_mode(extra=('--deliver', '--seat', 'reviewer@demo@remote')), 1)
+
+    def test_request_output_is_metadata_only_and_read_only(self):
+        self.initialize()
+        self.row(body='@agent:reviewer\nuntrusted shell input')
+        self.assertEqual(self.run_mode(), 0)
+        events = [json.loads(line) for line in self.output.getvalue().splitlines()]
+        request = next(event for event in events if event['status'] == 'request')
+        self.assertNotIn('body', request['event'])
+        self.assertNotIn('untrusted shell input', self.output.getvalue())
+        self.assertIn('body_sha256', request['event'])
+        self.assertEqual(set(monitor.load_state(self.state)['seen'].values()), {'notified'})
+        self.assertTrue(all(call[:2] == ['gh', 'api'] for call in self.calls))
+
+    def test_previous_state_version_preserved_without_api_calls(self):
+        self.initialize()
+        state = monitor.load_state(self.state)
+        state['version'] = 1
+        self.state.write_text(json.dumps(state), encoding='utf-8')
+        before = self.state.read_bytes()
+        self.assertEqual(self.run_mode(), 1)
+        self.assertEqual(self.state.read_bytes(), before)
+        self.assertFalse(self.calls)
+        self.assertIn('이전 버전', self.errors.getvalue())
+
+    def test_status_rejects_previous_version_without_overwrite(self):
+        self.initialize()
+        state = monitor.load_state(self.state)
+        state['version'] = 1
+        self.state.write_text(json.dumps(state), encoding='utf-8')
+        before = self.state.read_bytes()
+        self.assertEqual(self.run_mode('status'), 1)
+        self.assertEqual(self.state.read_bytes(), before)
         self.assertFalse(self.calls)
 
-    def test_persisted_remote_selection_overridden_for_child_only(self):
-        extra = ('--deliver', '--seat', 'reviewer@demo')
-        self.initialize(extra=extra)
+    def test_unknown_processing_status_preserved(self):
         self.row()
-        with patch.dict(monitor.os.environ, {'OPENRIG_HOST_SELECTED': 'remote'}):
-            self.assertEqual(self.run_mode(extra=extra), 0)
-            self.assertEqual(monitor.os.environ['OPENRIG_HOST_SELECTED'], 'remote')
+        self.initialize()
+        state = monitor.load_state(self.state)
+        state['seen'] = {key: 'unexpected' for key in state['seen']}
+        self.state.write_text(json.dumps(state), encoding='utf-8')
+        before = self.state.read_bytes()
+        self.assertEqual(self.run_mode(), 1)
+        self.assertEqual(self.state.read_bytes(), before)
+        self.assertFalse(self.calls)
+
+    def test_api_timeout_does_not_advance_state(self):
+        self.initialize()
+        before = self.state.read_bytes()
+        with patch.object(self, 'command', side_effect=subprocess.TimeoutExpired(['gh'], 30)):
+            self.assertEqual(self.run_mode(), 1)
+        self.assertEqual(self.state.read_bytes(), before)
+
+    def test_new_state_and_status_have_no_execution_binding(self):
+        self.initialize()
+        state = monitor.load_state(self.state)
+        self.assertEqual(state['version'], 2)
+        self.assertEqual(set(state['binding']), {'repo', 'recipient', 'allow_author', 'ignore_author'})
+        self.assertEqual(self.run_mode('status'), 0)
+        event = json.loads(self.output.getvalue().strip())
+        self.assertEqual(set(event), {'status', 'cursor', 'seen'})
 
 
 if __name__ == '__main__':

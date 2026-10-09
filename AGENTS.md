@@ -1,11 +1,21 @@
 # 개요
 - 프로젝트에 참여하는 Agent가 따라야할 규칙/정책
 
+## 작업·협업 저장소
+
+- 개발·이슈·PR·GitHub 요청 감시는 `jhlee0637/no-doc-no-nrs`에서만 진행한다.
+- 이전 계획 저장소는 더 이상 작업·게시·감시 대상으로 사용하지 않는다.
+- GitHub 감시 실행 시 `--repo jhlee0637/no-doc-no-nrs`를 명시한다.
+- 이전 저장소의 감시 상태 파일은 덮어쓰거나 재사용하지 않는다. 기존 감시를 중지한 뒤 새 저장소 전용 상태 파일로 기준선을 설정한다.
+
 # 규칙
+- 개발은 `docs/hackathon-rule.md`의 해커톤 규정을 따른다. AI 코딩 도구는 Codex만 사용한다.
+- 에이전트 조정은 자체 Skill·스크립트와 Codex 제공 Skill·MCP/API로 수행하며 외부 오케스트레이션 플랫폼은 사용하지 않는다.
+- `gh`와 Git 등 일반 개발 도구는 허용한다. 타 AI 코딩 보조 기능과 계정 공유는 사용하지 않는다.
 - README.md 파일은 agent가 수정하지 않는다.
     - 만약 수정하려는 경우, 사용자의 허가를 구한다.
 - Agent가 작성한 문서의 경우, 파일명 앞에 'ai-generated-'를 항상 붙인다.
-    - 예) 'ai-generated-openrig-install-test-guide.md'
+    - 예) 'ai-generated-install-test-guide.md'
 
 ## 외부 전달 및 공개 문서
 
