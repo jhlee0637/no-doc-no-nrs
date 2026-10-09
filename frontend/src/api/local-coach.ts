@@ -1,4 +1,5 @@
 import type { DemoInput, DemoOutcome } from "../prototype";
+import { isLocalAnalysisHost } from "./ai-generated-local-host";
 
 /** Runnable local proposal; this is not the final shared pipeline contract. */
 export interface LocalCoachConfig {
@@ -96,8 +97,8 @@ export async function runLocalCoach(input: DemoInput, onConfig?: (config: LocalC
   if (input.file.size > 5 * 1024 * 1024) {
     throw new Error("사진 파일은 5 MiB 이하로 선택해 주세요. 용량을 줄이거나 다른 사진으로 다시 시도해 주세요.");
   }
-  if (!["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname)) {
-    throw new Error("파이프라인 API 연결은 localhost에서만 사용할 수 있습니다.");
+  if (!isLocalAnalysisHost(window.location.hostname)) {
+    throw new Error("로컬 분석 서버는 localhost 또는 사설 네트워크 IPv4 주소에서만 사용할 수 있습니다.");
   }
   const controller = new AbortController();
   const abort = () => controller.abort(input.signal.reason);
@@ -108,6 +109,7 @@ export async function runLocalCoach(input: DemoInput, onConfig?: (config: LocalC
   const expire = () => { timedOut = true; controller.abort(); };
   let timer = window.setTimeout(expire, 195_000);
   const options: RequestInit = { signal: controller.signal, credentials: "omit", mode: "same-origin", redirect: "error", cache: "no-store" };
+  let stage = "서버 설정 조회";
   try {
     const response = await fetch("/api/coach/config", options);
     if (!response.ok) throw new Error(`로컬 API 설정을 확인할 수 없습니다 (HTTP ${response.status}).`);
@@ -123,6 +125,7 @@ export async function runLocalCoach(input: DemoInput, onConfig?: (config: LocalC
       exercise: config.exercise, handedness: config.handedness, reference_id: config.reference.id, reference_version: config.reference.version })) form.append(key, value);
     const headers: Record<string, string> = {};
     if (config.mode === "mock") headers["X-Local-Coach-Scenario"] = input.scenario;
+    stage = "사진 업로드·분석 응답 수신";
     const result = await fetch("/api/coach/analyze", { ...options, method: "POST", body: form, headers });
     const outcome = parseOutcome(await json(result), config, input.requestId);
     if (outcome.kind === "error" ? result.status < 400 || result.status >= 600 : result.status !== 200) throw invalid();
@@ -133,7 +136,7 @@ export async function runLocalCoach(input: DemoInput, onConfig?: (config: LocalC
     }
     if (input.signal.aborted) throw error;
     if (error instanceof Error && error.name !== "TypeError") throw error;
-    throw new Error("로컬 파이프라인 API에 연결할 수 없습니다. 서버를 확인하고 다시 시도해 주세요.");
+    throw new Error(`${stage} 중 네트워크 연결이 끊겼습니다. 페이지를 새로고침하고 핫스팟 연결을 유지한 채 다시 시도해 주세요. (${error instanceof Error ? error.message : "network error"})`);
   } finally {
     window.clearTimeout(timer);
     input.signal.removeEventListener("abort", abort);
