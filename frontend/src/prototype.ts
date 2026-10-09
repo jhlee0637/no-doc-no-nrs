@@ -17,7 +17,9 @@ export type DemoOutcome =
       title: string;
       summary: string;
       details: Array<{ label: string; text: string }>;
-      correctionImage: { kind: "not-provided" };
+      correctionImage:
+        | { kind: "not-provided" }
+        | { kind: "provided"; url: string; mimeType: "image/png"; width: number; height: number };
     }
   | { kind: "retake" | "error"; requestId: string; source: "mock"; title: string; message: string };
 
