@@ -141,6 +141,7 @@ def run_pipeline(query, input_type, catalog, output_dir, *, landmarker_model,
         annotated, query_url = evaluator.prepare_image(output_dir / 'query_landmarks.png')
         assessment, _ = evaluator.request_assessment(reference_url, query_url, reference_data, query_data, model, key, timeout=timeout)
         evaluator.validate(assessment)
+        (output_dir / 'assessment.json').write_text(json.dumps(assessment, ensure_ascii=False, indent=2), encoding='utf-8')
         if assessment['status'] == 'pose_mismatch':
             guidance = '기준 사진처럼 젓가락과 손가락 위치를 맞춰 다시 잡은 뒤 촬영해 주세요.'
             comment = assessment['comment']

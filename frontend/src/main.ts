@@ -7,6 +7,7 @@ import guideHoldClosed from "./assets/guide-hold-closed.png";
 import { makeRequestId } from "./api/ai-generated-request-id";
 
 const offline = import.meta.env.MODE === "offline";
+const defaultPipeline = !offline && !import.meta.env.DEV;
 
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("화면을 표시할 영역이 없습니다.");
@@ -21,7 +22,7 @@ app.innerHTML = `
       <p class="eyebrow">${offline ? "사진 한 장으로 살펴보는 오프라인 화면 예시" : "사진 한 장으로 시작하는 젓가락 코칭"}</p>
       <h1 id="page-title">${offline ? "젓가락 코칭 화면,<br />사진으로 미리 살펴봐요." : "나의 젓가락 자세,<br />사진으로 확인해요."}</h1>
       <p class="muted">${offline ? "손 사진을 선택하고 모의 안내 화면을 살펴보세요. 이 파일은 실제 사진을 분석하지 않습니다." : "젓가락을 잡은 손 사진을 선택하고 교정 안내 화면을 미리 살펴보세요."}</p>
-      <p id="transport-notice" class="notice">${offline ? "오프라인 화면 예시 · 사진 전송 없음" : "화면 검증용 모의 응답 · 서버 전송 없음"}</p>
+      <p id="transport-notice" class="notice">${offline ? "오프라인 화면 예시 · 사진 전송 없음" : defaultPipeline ? "로컬 분석 서버 · 서버 모드 확인 후 사진 전송" : "화면 검증용 모의 응답 · 서버 전송 없음"}</p>
     </section>
     <div class="workspace">
       <section class="card" aria-labelledby="photo-heading">
@@ -42,13 +43,13 @@ app.innerHTML = `
         <p id="status-message" class="status" data-state="info" role="status" aria-live="polite" aria-atomic="true">사진을 선택하면 미리보기를 확인할 수 있습니다.</p>
         <div id="photo-meta" class="photo-meta" hidden><strong id="file-name"></strong><span id="file-details" class="muted"></span><span class="preview-caption">선택한 원본의 브라우저 미리보기</span></div>
         <div class="actions"><button id="replace-photo" class="button button-secondary" type="button">사진 선택</button><button id="clear-photo" class="button button-secondary" type="button" disabled>사진 지우기</button></div>
-        <div id="transport-control" class="scenario-control"${offline ? " hidden" : ""}><label for="demo-transport">연결 방식</label><select id="demo-transport"><option value="browser">브라우저 화면 예시 · 전송 없음</option>${!offline && import.meta.env.DEV ? '<option value="http">localhost HTTP 모의 서버</option>' : ''}${offline ? '' : '<option value="pipeline">localhost 파이프라인 API</option>'}</select></div>
+        <div id="transport-control" class="scenario-control"${offline ? " hidden" : ""}><label for="demo-transport">연결 방식</label><select id="demo-transport"><option value="browser">브라우저 화면 예시 · 전송 없음</option>${!offline && import.meta.env.DEV ? '<option value="http">localhost HTTP 모의 서버</option>' : ''}${offline ? '' : `<option value="pipeline"${defaultPipeline ? ' selected' : ''}>로컬 분석 서버</option>`}</select></div>
         <div class="scenario-control"><label for="demo-scenario">살펴볼 모의 화면</label><select id="demo-scenario"><option value="feedback">교정 안내</option><option value="retake">재촬영 안내</option><option value="error">서비스 오류</option></select></div>
         <div class="actions"><button id="show-result" class="button button-primary" type="button" disabled>모의 결과 보기 <span aria-hidden="true">→</span></button><button id="cancel-request" class="button button-secondary" type="button" hidden>취소</button></div>
       </section>
       <section id="result-panel" class="card" aria-labelledby="result-heading" aria-busy="false">
         <div class="card-heading"><span class="step-number">02</span><div><p class="small-label">YOUR FEEDBACK</p><h2 id="result-heading">교정 안내</h2></div></div>
-        <div id="result-empty" class="result-empty"><span aria-hidden="true">↗</span><h3>다음 자세를 위한 작은 힌트</h3><p class="muted">사진을 선택하고 모의 결과를 확인해 보세요.<br />${offline ? "이 파일은 실제 사진을 분석하지 않습니다." : "교정 이미지와 안내가 들어갈 화면입니다."}</p></div>
+        <div id="result-empty" class="result-empty"><span aria-hidden="true">↗</span><h3>다음 자세를 위한 작은 힌트</h3><p class="muted">${defaultPipeline ? "사진을 선택하고 분석 결과를 확인해 보세요." : "사진을 선택하고 모의 결과를 확인해 보세요."}<br />${offline ? "이 파일은 실제 사진을 분석하지 않습니다." : "교정 이미지와 안내가 들어갈 화면입니다."}</p></div>
         <div id="result-content" class="result-content" hidden>
           <p id="outcome-badge" class="outcome-badge">모의 응답</p>
           <h3 id="feedback-title" class="feedback-title"></h3>
@@ -311,7 +312,7 @@ async function showResult(): Promise<void> {
     const outcome = pipeline ? await runLocalCoach(input, config => {
       if (generation !== requestGeneration || controller.signal.aborted) return;
       pipelineMode = config.mode;
-      transportNotice.textContent = config.mode === "mock" ? "로컬 파이프라인 API · 모의 모드 · 실제 분석 없음" : "로컬 파이프라인 API · 서버 분석 모드 · 사진 전송";
+      transportNotice.textContent = config.mode === "mock" ? "로컬 분석 서버 · 모의 모드 · 실제 분석 없음" : "로컬 분석 서버 · 서버 분석 모드 · 사진 전송";
       message(config.mode === "mock" ? "로컬 API 모의 응답을 요청하고 있습니다. 실제 사진 분석은 없습니다." : "서버 분석을 요청하고 있습니다. 모의 화면 선택은 적용하지 않습니다.", "busy");
       updateControls();
     }) : await (http ? runPrototypeHttp : runMock)(input);
@@ -371,7 +372,7 @@ transport.addEventListener("change", () => {
   }
   const http = transport.value === "http";
   const pipeline = transport.value === "pipeline";
-  transportNotice.textContent = pipeline ? "로컬 파이프라인 API · 서버 모드 확인 후 사진 전송" : http ? "localhost 모의 서버 전송 · 실제 분석 없음" : "화면 검증용 모의 응답 · 서버 전송 없음";
+  transportNotice.textContent = pipeline ? "로컬 분석 서버 · 서버 모드 확인 후 사진 전송" : http ? "localhost 모의 서버 전송 · 실제 분석 없음" : "화면 검증용 모의 응답 · 서버 전송 없음";
   message(pipeline ? "로컬 API 결과 보기에서 서버 설정을 먼저 확인한 뒤 사진을 전송합니다." : http ? "localhost 모의 연결을 선택했습니다. 결과 보기 시 실제 파일을 로컬 서버로 전송합니다." : "브라우저 모의 연결을 선택했습니다. 사진을 서버로 전송하지 않습니다.");
 });
 cancelButton.addEventListener("click", () => {
@@ -389,3 +390,6 @@ window.addEventListener("pagehide", (event) => {
   invalidateRequest();
   releasePhoto();
 });
+
+// Hosted builds start with the analysis server; offline and development remain browser demos.
+updateControls();

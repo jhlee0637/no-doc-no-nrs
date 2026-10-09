@@ -1,5 +1,6 @@
 """Provisional same-origin localhost API; mock mode never invokes analysis."""
 import argparse
+import ipaddress
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from email import policy
@@ -163,6 +164,7 @@ class Settings:
     deadline_seconds: float = 180
     asset_ttl_seconds: int = 600
     allowed_origins: tuple[str, ...] = ("http://127.0.0.1:5173", "http://localhost:5173")
+    allowed_hosts: tuple[str, ...] = ()
     cache: AssetCache | None = None
     gate: threading.Lock = field(default_factory=threading.Lock)
     frontend_dir: Path | None = None
@@ -176,7 +178,7 @@ class Settings:
             raise ValueError("invalid_mode")
         for origin in self.allowed_origins:
             parsed = urlsplit(origin)
-            if parsed.scheme != "http" or parsed.hostname not in ("localhost", "127.0.0.1", "::1") or parsed.path or parsed.query or parsed.fragment or parsed.username or parsed.password:
+            if parsed.scheme != "http" or not (parsed.hostname in ("localhost", "127.0.0.1", "::1") or (parsed.hostname and ipaddress.ip_address(parsed.hostname).is_private)) or parsed.path or parsed.query or parsed.fragment or parsed.username or parsed.password:
                 raise ValueError("invalid_origin")
         if self.cache is None:
             self.cache = AssetCache(self.asset_ttl_seconds)
@@ -205,7 +207,7 @@ def mock_result(scenario):
     return {"source": "mock", "outcome": "feedback", "feedback": {"status": "assessable", "comment": "HTTP 연결 검증용 모의 응답입니다. 선택한 사진을 분석하지 않았습니다.", "corrections": [{"joint_name": "예시 관절", "instruction": "관절별 안내의 표시를 확인하기 위한 모의 문구입니다."}], "image": {"mime_type": "image/png", "width": 32, "height": 24}}}, output.getvalue()
 
 
-def build_server(settings=None, *, port=8000):
+def build_server(settings=None, *, port=8000, host="127.0.0.1"):
     settings = settings or Settings()
 
     class Handler(BaseHTTPRequestHandler):
@@ -253,7 +255,7 @@ def build_server(settings=None, *, port=8000):
             request_parts = self.requestline.split()
             if len(request_parts) < 2 or not request_parts[1].startswith("/") or request_parts[1].startswith("//"):
                 return False
-            hosts = {f"127.0.0.1:{self.server.server_port}", f"localhost:{self.server.server_port}"}
+            hosts = {f"127.0.0.1:{self.server.server_port}", f"localhost:{self.server.server_port}", *settings.allowed_hosts}
             raw_hosts = self.headers.get_all("Host", [])
             if len(raw_hosts) != 1 or raw_hosts[0] not in hosts:
                 return False
@@ -351,7 +353,7 @@ def build_server(settings=None, *, port=8000):
             except Exception:
                 self.fail("pipeline_failed", 502, request_id)
 
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    server = ThreadingHTTPServer((host, port), Handler)
     # Normal shutdown waits for active bounded requests and their private cleanup.
     server.daemon_threads = False
     server.settings = settings
@@ -361,6 +363,10 @@ def build_server(settings=None, *, port=8000):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=("mock", "analysis"), default="mock")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--allowed-host", action="append", default=[])
+    parser.add_argument("--analysis-root", type=Path)
+    parser.add_argument("--confidence", type=float, default=0.5)
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--catalog", type=Path)
     parser.add_argument("--landmarker-model", type=Path)
@@ -373,13 +379,13 @@ def main(argv=None):
     if args.mode == "analysis" and (args.catalog is None or args.landmarker_model is None):
         parser.error("analysis 모드에는 catalog와 landmarker-model이 필요합니다.")
     try:
-        runner = PipelineRunner(args.catalog, args.landmarker_model, python=args.pipeline_python) if args.mode == "analysis" else None
+        runner = PipelineRunner(args.catalog, args.landmarker_model, python=args.pipeline_python, analysis_root=args.analysis_root, confidence=args.confidence) if args.mode == "analysis" else None
         origins = ("http://127.0.0.1:5173", "http://localhost:5173", *args.allowed_origin)
-        settings = Settings(args.mode, runner, allowed_origins=origins, frontend_dir=args.frontend_dir)
-        server = build_server(settings, port=args.port)
+        settings = Settings(args.mode, runner, allowed_origins=origins, allowed_hosts=tuple(args.allowed_host), frontend_dir=args.frontend_dir)
+        server = build_server(settings, port=args.port, host=args.host)
     except Exception:
         parser.exit(2, "로컬 서버 설정을 확인하세요. 분석 모드의 기준·모델·인터프리터와 지정한 frontend의 index.html이 필요합니다.\n")
-    print(f"Local coach API: http://127.0.0.1:{args.port} (mode={args.mode}; provisional contract)")
+    print(f"Local coach API: http://{args.host}:{args.port} (mode={args.mode}; provisional contract)")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -1,4 +1,5 @@
 import type { DemoInput, DemoOutcome } from "../prototype";
+import { isLocalAnalysisHost } from "./ai-generated-local-host";
 
 /** Runnable local proposal; this is not the final shared pipeline contract. */
 export interface LocalCoachConfig {
@@ -96,8 +97,8 @@ export async function runLocalCoach(input: DemoInput, onConfig?: (config: LocalC
   if (input.file.size > 5 * 1024 * 1024) {
     throw new Error("사진 파일은 5 MiB 이하로 선택해 주세요. 용량을 줄이거나 다른 사진으로 다시 시도해 주세요.");
   }
-  if (!["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname)) {
-    throw new Error("파이프라인 API 연결은 localhost에서만 사용할 수 있습니다.");
+  if (!isLocalAnalysisHost(window.location.hostname)) {
+    throw new Error("로컬 분석 서버는 localhost 또는 사설 네트워크 IPv4 주소에서만 사용할 수 있습니다.");
   }
   const controller = new AbortController();
   const abort = () => controller.abort(input.signal.reason);
