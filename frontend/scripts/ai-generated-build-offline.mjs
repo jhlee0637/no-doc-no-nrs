@@ -38,7 +38,7 @@ const hash = content => createHash('sha256').update(content).digest('base64');
 const policy = `default-src 'none'; script-src 'sha256-${hash(script)}'; style-src 'sha256-${hash(style)}'; img-src data: blob:; font-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'`;
 const html = index.replace(scriptMatch[0], `<script type="module">${script}</script>`)
   .replace(styleMatch[0], `<style>${style}</style>`)
-  .replace('<head>', `<head>\n    <meta name="chopcoach-mode" content="offline">\n    <meta http-equiv="Content-Security-Policy" content="${policy}">`)
+  .replace('<head>', `<head>\n    <meta name="chopcoach-mode" content="offline">\n    <meta http-equiv="Content-Security-Policy" content="${policy}">\n    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'%3E%3C/svg%3E">`)
   .replace(/<title>[^<]*<\/title>/, '<title>ChopCoach · 사진 선택 화면 예시</title>');
 const destination = join(output, 'ai-generated-chopcoach-offline.html');
 await writeFile(destination, html);
