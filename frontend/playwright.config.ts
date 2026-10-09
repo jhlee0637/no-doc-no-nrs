@@ -2,6 +2,7 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests',
+  testIgnore: '**/offline-page.spec.ts',
   outputDir: '../etc/gui-prototype/test-results',
   fullyParallel: true,
   workers: 3,

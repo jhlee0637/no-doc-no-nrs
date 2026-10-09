@@ -63,8 +63,10 @@ h1 { margin: 0 0 16px; font-size: clamp(30px, 3.2vw, 43px); line-height: 1.35; f
 .button-primary:hover:not(:disabled) { background: #193f31; }
 .button-secondary { background: transparent; color: #5a6b5f; }
 .button-secondary:hover:not(:disabled) { background: #eef1e8; }
-.status { font-size: 12px; line-height: 1.7; color: #6b786c; min-height: 21px; margin: 16px 0 0; }
-.status[data-kind="error"], .status.error { color: #b14c35; }
+.status { font-size: 12px; line-height: 1.7; color: var(--muted); min-height: 21px; margin: 12px 0 0; padding: 8px 10px; border: 1px solid transparent; border-radius: 8px; background: #f5f6f0; }
+.status[data-state="busy"] { color: #435b4b; background: #edf1e9; }
+.status[data-state="success"] { color: var(--green); background: #ebefe6; }
+.status.error { color: #963d2b; background: #fff0e6; border-color: #e2c7ba; }
 .notice, .hero .notice { display: flex; align-items: flex-start; gap: 8px; border: 1px solid #ecdfc7; color: #796142; background: #f8f1e5; padding: 11px 14px; font-size: 12px; line-height: 1.65; border-radius: 10px; margin-top: 20px; margin-bottom: 20px; }
 .scenario-control { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 17px; color: #69776d; font-size: 12px; }
 .scenario-control select { color: #435b4b; border: 1px solid #dce2d6; border-radius: 8px; background: #fff; padding: 8px 30px 8px 10px; max-width: 100%; }
