@@ -2,6 +2,8 @@ import "./styles.css";
 import { runMock, type DemoOutcome, type DemoScenario, type SelectedPhoto } from "./prototype";
 import { runPrototypeHttp } from "./api/prototype-http";
 import { runLocalCoach } from "./api/local-coach";
+import guideHoldOpen from "./assets/guide-hold-open.png";
+import guideHoldClosed from "./assets/guide-hold-closed.png";
 
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("화면을 표시할 영역이 없습니다.");
@@ -21,6 +23,14 @@ app.innerHTML = `
     <div class="workspace">
       <section class="card" aria-labelledby="photo-heading">
         <div class="card-heading"><span class="step-number">01</span><div><p class="small-label">YOUR PHOTO</p><h2 id="photo-heading">손 사진 선택</h2></div></div>
+        <section id="photo-guide" class="photo-guide" aria-labelledby="photo-guide-heading">
+          <h3 id="photo-guide-heading">사진을 이렇게 찍어 주세요</h3>
+          <p>손가락과 젓가락이 함께 보이도록 찍어 주세요. 현재 모습의 사진 한 장을 올려 주세요.</p>
+          <div class="capture-examples">
+            <figure><img id="guide-hold-open" src="${guideHoldOpen}" width="1254" height="1254" decoding="async" alt="손가락으로 두 젓가락을 잡고 앞쪽 끝을 벌린 손 모습" /><figcaption>젓가락을 벌린 모습</figcaption></figure>
+            <figure><img id="guide-hold-closed" src="${guideHoldClosed}" width="1254" height="1254" decoding="async" alt="손가락으로 두 젓가락을 잡고 앞쪽 끝을 모은 손 모습" /><figcaption>젓가락을 모은 모습</figcaption></figure>
+          </div>
+        </section>
         <input id="photo-input" class="file-picker" type="file" accept="image/jpeg,image/png" hidden />
         <div id="drop-zone" class="drop-zone" tabindex="0" role="button" aria-label="JPEG 또는 PNG 손 사진 선택. 사진을 끌어 놓아도 됩니다.">
           <div id="upload-empty" class="upload-empty"><span aria-hidden="true">＋</span><strong>사진을 선택해 주세요</strong><p>클릭하거나 사진 한 장을 끌어 놓으세요</p><p class="muted">JPEG · PNG</p></div>
@@ -28,7 +38,6 @@ app.innerHTML = `
         </div>
         <div id="photo-meta" class="photo-meta" hidden><strong id="file-name"></strong><span id="file-details" class="muted"></span><span class="preview-caption">선택한 원본의 브라우저 미리보기</span></div>
         <div class="actions"><button id="replace-photo" class="button button-secondary" type="button">사진 선택</button><button id="clear-photo" class="button button-secondary" type="button" disabled>사진 지우기</button></div>
-        <p class="muted">손과 젓가락이 함께 보이도록 촬영하면 좋아요.</p>
         <div class="scenario-control"><label for="demo-transport">연결 방식</label><select id="demo-transport"><option value="browser">브라우저 화면 예시 · 전송 없음</option>${import.meta.env.DEV ? '<option value="http">localhost HTTP 모의 서버</option>' : ''}<option value="pipeline">localhost 파이프라인 API</option></select></div>
         <div class="scenario-control"><label for="demo-scenario">살펴볼 모의 화면</label><select id="demo-scenario"><option value="feedback">교정 안내</option><option value="retake">재촬영 안내</option><option value="error">서비스 오류</option></select></div>
         <div class="actions"><button id="show-result" class="button button-primary" type="button" disabled>모의 결과 보기 <span aria-hidden="true">→</span></button><button id="cancel-request" class="button button-secondary" type="button" hidden>취소</button></div>

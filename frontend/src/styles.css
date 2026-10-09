@@ -41,6 +41,13 @@ h1 { margin: 0 0 16px; font-size: clamp(30px, 3.2vw, 43px); line-height: 1.35; f
 .card-heading { display: flex; align-items: center; gap: 10px; margin: 0 0 20px; }
 .card-heading h2 { margin: 0; font-size: 18px; letter-spacing: -.5px; }
 .step-number { display: grid; place-items: center; width: 27px; height: 27px; border-radius: 9px; color: var(--green); background: #ebefe6; font-size: 12px; font-weight: 700; }
+.photo-guide { padding: 14px; margin-bottom: 18px; border: 1px solid var(--border); border-radius: 12px; background: #f5f6f0; }
+.photo-guide h3 { margin: 0 0 8px; color: var(--green); font-size: 14px; line-height: 1.5; }
+.photo-guide p { margin: 0 0 12px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.capture-examples { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.capture-examples figure { min-width: 0; margin: 0; }
+.capture-examples img { display: block; width: 100%; height: auto; max-height: 170px; aspect-ratio: 1; object-fit: contain; border-radius: 8px; background: #fff; }
+.capture-examples figcaption { margin-top: 7px; color: #435b4b; font-size: 12px; font-weight: 600; line-height: 1.6; text-align: center; }
 .drop-zone { position: relative; display: grid; place-items: center; width: 100%; min-height: 270px; border: 1.5px dashed #cbd3c6; border-radius: 13px; background: #f5f6f0; overflow: hidden; transition: border-color .15s, background .15s; }
 .drop-zone.drag-over { border-color: var(--orange); background: #fff0e6; }
 .upload-empty { padding: 24px; text-align: center; color: #5a6c61; }
