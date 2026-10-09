@@ -126,7 +126,28 @@ export async function runLocalCoach(input: DemoInput, onConfig?: (config: LocalC
     const headers: Record<string, string> = {};
     if (config.mode === "mock") headers["X-Local-Coach-Scenario"] = input.scenario;
     stage = "사진 업로드·분석 응답 수신";
-    const result = await fetch("/api/coach/analyze", { ...options, method: "POST", body: form, headers });
+    if (config.mode === "analysis") headers["X-Coach-Async"] = "1";
+    let result = await fetch("/api/coach/analyze", { ...options, method: "POST", body: form, headers });
+    if (result.status === 202) {
+      const accepted = await json(result);
+      if (!record(accepted) || accepted.request_id !== input.requestId || !text(accepted.job_url) ||
+          !/^\/api\/coach\/jobs\/[A-Za-z0-9_-]{32}$/.test(accepted.job_url)) throw invalid();
+      const jobUrl = accepted.job_url;
+      stage = "분석 결과 조회";
+      while (true) {
+        await new Promise<void>((resolve, reject) => {
+          const pause = window.setTimeout(() => { controller.signal.removeEventListener("abort", cancel); resolve(); }, 1000);
+          const cancel = () => { window.clearTimeout(pause); reject(new DOMException("취소", "AbortError")); };
+          if (controller.signal.aborted) cancel();
+          else controller.signal.addEventListener("abort", cancel, { once: true });
+        });
+        try { result = await fetch(jobUrl, options); }
+        catch (error) { if (controller.signal.aborted) throw error; continue; }
+        if (result.status !== 202) break;
+        const pending = await json(result);
+        if (!record(pending) || pending.request_id !== input.requestId || pending.status !== "pending") throw invalid();
+      }
+    }
     const outcome = parseOutcome(await json(result), config, input.requestId);
     if (outcome.kind === "error" ? result.status < 400 || result.status >= 600 : result.status !== 200) throw invalid();
     return outcome;

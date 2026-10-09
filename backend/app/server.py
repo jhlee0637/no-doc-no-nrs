@@ -168,6 +168,9 @@ class Settings:
     cache: AssetCache | None = None
     gate: threading.Lock = field(default_factory=threading.Lock)
     frontend_dir: Path | None = None
+    workers: list = field(default_factory=list)
+    jobs: dict = field(default_factory=dict)
+    jobs_lock: threading.Lock = field(default_factory=threading.Lock)
     static_frontend: StaticFrontend | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self):
@@ -272,6 +275,21 @@ def build_server(settings=None, *, port=8000, host="127.0.0.1"):
             if self.path == "/api/coach/config":
                 self.send_json(200, settings.config())
                 return
+            job_match = re.fullmatch(r"/api/coach/jobs/([A-Za-z0-9_-]{32})", self.path)
+            if job_match:
+                with settings.jobs_lock:
+                    job = settings.jobs.get(job_match[1])
+                    if job and time.monotonic() - job["created"] > 600:
+                        settings.jobs.pop(job_match[1], None)
+                        job = None
+                    response = job.get("response") if job else None
+                if job is None:
+                    self.fail("job_not_found", 404)
+                elif response is None:
+                    self.send_json(202, {"status": "pending", "request_id": job["request_id"]})
+                else:
+                    self.send_json(*response)
+                return
             match = re.fullmatch(r"/api/coach/assets/([A-Za-z0-9_-]{32})\.png", self.path)
             content = settings.cache.get(match[1]) if match else None
             if match is None and settings.static_frontend is not None:
@@ -332,6 +350,48 @@ def build_server(settings=None, *, port=8000, host="127.0.0.1"):
                 if not settings.gate.acquire(blocking=False):
                     self.fail("busy", 503, request_id)
                     return
+                if self.headers.get("X-Coach-Async") == "1" and settings.mode == "analysis":
+                    token = secrets.token_urlsafe(24)
+                    with settings.jobs_lock:
+                        now = time.monotonic()
+                        settings.jobs = {k: v for k, v in settings.jobs.items()
+                                         if now - v["created"] <= 600}
+                        if len(settings.jobs) >= 32:
+                            oldest = min(settings.jobs, key=lambda k: settings.jobs[k]["created"])
+                            settings.jobs.pop(oldest)
+                        settings.jobs[token] = {"created": now, "request_id": request_id}
+                    def analyze_job():
+                        value = settings.envelope(request_id)
+                        status = 200
+                        try:
+                            result, image = settings.runner.run(content, timeout=settings.deadline_seconds - (time.monotonic() - started))
+                            value.update(result)
+                            if image is not None:
+                                value["feedback"]["image"]["url"] = settings.cache.put(image)
+                        except Exception as exc:
+                            value = settings.envelope(request_id)
+                            code = exc.code if isinstance(exc, PipelineFailure) else "pipeline_failed"
+                            status = 504 if code == "timeout" else 502
+                            value["error"] = {"code": code, "message": ERROR_MESSAGES.get(code, "분석을 완료하지 못했습니다. 다시 시도해 주세요.")}
+                        finally:
+                            with settings.jobs_lock:
+                                if token in settings.jobs:
+                                    settings.jobs[token]["response"] = (status, value)
+                            settings.gate.release()
+                    worker = threading.Thread(target=analyze_job, daemon=False)
+                    with settings.jobs_lock:
+                        settings.workers = [w for w in settings.workers if w.is_alive()]
+                        settings.workers.append(worker)
+                    try:
+                        worker.start()
+                    except Exception:
+                        settings.gate.release()
+                        with settings.jobs_lock:
+                            settings.jobs.pop(token, None)
+                        raise
+                    self.send_json(202, {"status": "pending", "request_id": request_id,
+                                         "job_url": "/api/coach/jobs/" + token})
+                    return
                 try:
                     if settings.mode == "mock":
                         result, image = mock_result(scenario)
@@ -353,7 +413,16 @@ def build_server(settings=None, *, port=8000, host="127.0.0.1"):
             except Exception:
                 self.fail("pipeline_failed", 502, request_id)
 
-    server = ThreadingHTTPServer((host, port), Handler)
+    class AnalysisHTTPServer(ThreadingHTTPServer):
+        def server_close(self):
+            super().server_close()
+            with settings.jobs_lock:
+                workers = list(settings.workers)
+            for worker in workers:
+                if worker.ident is not None:
+                    worker.join()
+
+    server = AnalysisHTTPServer((host, port), Handler)
     # Normal shutdown waits for active bounded requests and their private cleanup.
     server.daemon_threads = False
     server.settings = settings
