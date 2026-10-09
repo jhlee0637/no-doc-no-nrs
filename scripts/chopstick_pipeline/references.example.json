@@ -1,0 +1,10 @@
+{
+  "schema_version": "1",
+  "references": {
+    "basic_grip": {
+      "reference_id": "basic-grip-example",
+      "reference_version": "1",
+      "image": "test_3.jpg"
+    }
+  }
+}
